@@ -1,0 +1,6 @@
+#!/bin/bash
+cwd="${PWD}"
+bkup="${HOME}/.home_backup"
+command cd "${bkup}"
+git ls-files -z |
+    xargs -I '{}' -r0 cp -puv "${HOME}"/'{}' "${cwd}"/'{}'

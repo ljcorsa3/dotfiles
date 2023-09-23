@@ -1,0 +1,116 @@
+#!/bin/bash
+# combine all history files, sorted by time.
+# keep last n entries as new HISTFILE
+
+if [[ $_ != $0 ]]; then
+    isSourced=1
+    LEAVE=return
+    [ "${HISTFILE}" ] || ${LEAVE} 1
+else
+    isSourced=0
+    LEAVE=exit
+fi
+trap 'unset LEAVE REGEX FILES AWKSCRIPT isSourced rc' RETURN
+
+[ -d ~/.bash_history ] || ${LEAVE} 1
+
+# get list of history files
+REGEX='.*/.bash_history/[[:digit:]]{6}.*'
+REGEX+="-${HOST}-"
+REGEX+='.*'
+FILES=( $(find ~/.bash_history -mindepth 1 -maxdepth 1 \
+    -regextype posix-egrep -regex "${REGEX}" -print)
+)
+((${#FILES[@]})) || $LEAVE 1
+
+# store the awk script
+AWKSCRIPT=$( cat << '@@AWKSCRIPT_END@@'
+    # every file is processed to create an array of timestamps 
+    # with a command as its index
+    #
+    # after all files are processed, copy the array of timestamps
+    # to an array of commands with a timestamp as its index.
+    # (This makes them unique)
+    # Then sort 
+
+    function assign_command_to_timestamps() {
+        if (length(command)>0 && length(command)>0) {
+		    # keep latest timestamp for a command
+            if (command in timestamps) {
+                if (timestamp > timestamps[command]) {
+                    timestamps[command] = timestamp
+                }
+            } else {
+                timestamps[command] = timestamp
+            }
+        }
+        timestamp = command = ""
+    }
+
+    BEGIN {
+        # set sort order to numeric
+        PROCINFO["sorted_in"] = "@ind_str_asc"
+    }
+    
+    # reset values for every file
+    BEGINFILE {
+        timestamp = command = ""
+    }
+
+    #EVERY LINE:
+        # hash + timestamp indicates new command on next line(s)
+        /^#[0-9]{10,10}/ {
+            assign_command_to_timestamps()
+            timestamp = substr($1,2)
+            next
+        }
+        # everything else is a command.  create if empty, add if not
+        {
+            if (length(command)==0) {
+                command = $0
+            } else {
+                command = command ";" $0
+            }
+            next
+        }
+
+    ENDFILE {
+        # clean up individual file processing by including
+        # any dangling last line with previous 
+        assign_command_to_timestamps()
+    }
+
+    END {
+        # we now have an array of timestamps whose index is the command
+		# we need to create an array of commands whose index is the timestamp
+        for (command in timestamps) {
+            commands[timestamps[command]] = command
+        }
+		# sort the commands by their index (timestamp) back into the timestamps array
+        n=asorti(commands,timestamps)
+		# only want to keep latest MAX entries
+        if (MAX==0) {
+            i = 1
+        } else if (n>MAX) {
+            i = n-MAX
+        } else {
+            i = 1
+        }
+		# write last entries in HISTFILE-format
+        for (; i<=n; i++) {
+            printf "#%s\n%s\n", timestamps[i], commands[timestamps[i]]
+        }
+    }
+
+@@AWKSCRIPT_END@@
+)
+
+if ((isSourced)); then
+    #builtin history -a
+    MAX=${HISTFILESIZE:=200}
+    awk -v MAX=${MAX} -- "${AWKSCRIPT}" ${FILES[@]} > ${HISTFILE} ; rc=$?
+    builtin history -c -r ${HISTFILE} &>/dev/null
+else
+    awk -- "${AWKSCRIPT}" ${FILES[@]} ; rc=$?
+fi
+${LEAVE} ${rc}
