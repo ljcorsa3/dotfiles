@@ -1,0 +1,12 @@
+[user]
+	name = Larry Corsa
+	email = larry.corsa@drs.com
+[core]
+	autocrlf = input
+	editor = vim
+[commit]
+	verbose = true
+[diff]
+	tool = meld
+[merge]
+	tool = meld

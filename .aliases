@@ -1,0 +1,163 @@
+# .aliases
+# vim: filetype=sh
+
+alias vnc='sudo systemctl restart vncserver.ljcorsa@:2.service'
+alias usb0="title ttyUSB0; socat READLINE,history=$HOME/hist-usb0,noprompt OPEN:/dev/ttyUSB0,b115200,cs8,nonblock,rawer"
+alias usb1="title ttyUSB1; socat READLINE,history=$HOME/hist-usb1,noprompt OPEN:/dev/ttyUSB1,b115200,cs8,nonblock,rawer"
+alias ascii='command man ascii| sed -e "/./{H;$!d;}" -e "x;/70 80 90 100/!d"'
+alias dj='echo "1-703-296-9722"'
+alias l="command ls -m $LS_OPTIONS"
+alias la="command ls -A $LS_OPTIONS"
+alias ls="command ls $LS_OPTIONS"
+alias l.="command ls -d .* $LS_OPTIONS"
+alias ll="command ls -l $LS_OPTIONS"
+alias lla="command ls -l $LS_OPTIONS"
+alias lp='command lp -o landscape -o page-top=40 -o page-bottom=40 -o page-left=40 -o page-right=40'
+#FIND='ls -pQ'
+#RMDOT="|sed -ne '/\/$/s///p'"
+FIND="2>/dev/null find . -maxdepth 1 -type d ! -name '.'"
+PRINT="-print0|sed -e 's/\d0\.\//\d0/g' -e 's/^\.\d0//' -e 's/^\.\///'"
+PRINT="-printf '%P\0'"
+RMDOT="! -name '\.*'"
+LSD_OPTIONS="$LS_OPTIONS --indicator-style=none"
+alias lsd="$FIND $RMDOT $PRINT |xargs -r0 ls -d $LSD_OPTIONS"
+alias lsda="$FIND $PRINT |xargs -r0 ls -d $LSD_OPTIONS"
+alias lld="$FIND $RMDOT $PRINT |xargs -r0 ls -ld $LSD_OPTIONS"
+alias llda="$FIND $PRINT |xargs -r0 ls -ld $LSD_OPTIONS"
+FIND="find . -maxdepth 1 -executable -type f"
+alias lx="$FIND ! -name '\.*' $PRINT |xargs -r0 ls -d $LSD_OPTIONS"
+unset FIND RMDOT PRINT LSD_OPTIONS
+HIST='builtin fc -l'
+alias h="${HIST} -$((LINES/2))"
+alias hh="${HIST} -$((LINES-2))"
+alias hhh="${HIST} -10000"
+if [[ "$HISTTIMEFORMAT" ]]; then
+    # lowercase h skips timestamp
+    # uppercase H formats timestamp
+    HIST='builtin history '
+    alias H=
+else
+    HIST='builtin history '
+    alias H="${HIST} $((LINES/2))"
+    alias HH="${HIST} $((LINES-2))"
+    alias HHH="${HIST}"
+fi
+alias r="fc -s"
+alias rd=rmdir
+alias md=mkdir
+alias del=rm
+alias erase=rm
+alias rename=mv
+alias copy=cp
+alias move=mv
+alias du='du -kh'
+alias df='df -kTh'
+alias xs='cd'
+alias vf='cd'
+alias moer='more'
+alias moew='more'
+alias ks='ls'
+alias kk='ll'
+alias untic=infocmp
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+alias path='echo -e ${PATH//:/\\n}'
+alias cls="tput clear; tput rs1; tput cup 0 0 "
+[ "$COLORTERM" ] && export TERM=xterm-256color
+if [[ "$TERM" =~ putty ]]; then
+#    echo $'\cE'; read -rt 1 -n5 termResponse # expect 5 chars
+#    echo -ne '\0177\0177\0177\0177\0177' # delete 5 chars
+#    if [ "${termResponse}" == "PuTTY" ]; then
+        alias cls="tput clear; echo -e '\e[3J'; tput cup 0 0"
+#    fi
+#    unset termResponse
+fi
+[ "${PAGER}" ] && alias more=${PAGER}
+[ "${EDITOR}" ] && { alias vi=${EDITOR}; alias vim=${EDITOR}; }
+alias barebash='env -i bash --norc --noprofile -i -c "exec -cl bash --norc --noprofile -i"'
+alias dir=ll
+alias edit=vim
+alias view='vim -R'
+alias func='typeset -f'
+#alias funcs='typeset -F | sed -e "s/^declare -f [[:alpha:]]*[[:space:]]*//" | LC_COLLATE=C sort' 
+alias hostname='command hostname -s'
+alias ssh-reauth='export SSH_AUTH_SOCK=$(find /tmp -uid $UID -name "agent*" -print0 2>/dev/null | xargs -r0 ls -u | head -n 1)'
+alias ssh-a='ssh -a -o "StrictHostKeyChecking no" -o "PubkeyAuthentication no" -o "IdentitiesOnly yes" -o "PreferredAuthentications password" -o "UserKnownHostsFile /dev/null"'
+if type -p xterm >&/dev/null; then
+    alias term='xterm'
+elif type -p gnome-terminal >&/dev/null; then
+    alias term='gnome-terminal'
+    alias xterm='gnome-terminal'
+fi
+if type -p watch >&/dev/null; then
+    alias follow='watch -n 1'
+fi
+if [ -d ~/lib ]; then
+    alias locateH='/usr/bin/locate -d ${HOME}/lib/home.db'
+    alias locateR='/usr/bin/locate -d ${HOME}/lib/R.db'
+    alias locateU='/usr/bin/locate -d ${HOME}/lib/U.db'
+    alias locateF='/usr/bin/locate -d ${HOME}/lib/root.db'
+    alias locateg='/usr/bin/locate -d ${HOME}/lib/git.db'
+    alias Locate='/usr/bin/locate -d ${HOME}/lib/root.db:${HOME}/lib/home.db:${HOME}/lib/R.db:${HOME}/lib/U.db:${HOME}/lib/git.db'
+fi
+#if type -p ssh.exp >&/dev/null; then
+#   alias ssh=ssh.exp
+#fi
+if type -p git >&/dev/null; then
+    #   if type -p git.exp >&/dev/null; then
+    #      alias git=git.exp
+    #   fi
+    alias commit='git commit'
+    alias checkout='git checkout'
+    alias branch='git branch'
+    alias difftool='git difftool'
+    alias status='git status'
+    alias githist='git log -p --'
+fi
+alias cd=cd_
+
+# assign a DOS alias (eg, "G:", "g:") to every mount point
+if [ -d /cygdrive/c ];then
+    for i in /cygdrive/* ; do
+        j=${i##*/}
+        alias "${j,,}:=cd /cygdrive/$j"
+        alias "${j^^}:=cd /cygdrive/$j"
+    done
+    alias pscp='/cygdrive/c/Program\ Files\ \(x86\)/PuTTY/pscp.exe'
+elif [ -d /mnt/ljcorsa ]; then
+    for i in /mnt/ljcorsa/*; do
+        j=${i##*/}
+        alias "${j,,}:=cd /mnt/ljcorsa/$j"
+        alias "${j^^}:=cd /mnt/ljcorsa/$j"
+    done
+fi
+unset i j
+
+alias vimhelp='"${EDITOR}" -c "set hh=1000" -c help -c only'
+alias hexdump='command hexdump -f ~/.hexdumpfmt'
+
+# use rlwrap as a helper for several interactive commands
+if type -p rlwrap &>/dev/null; then 
+    RLW='rlwrap -pgreen'
+    alias tcl="${RLW} tclsh"
+    alias tclsh="${RLW} tclsh"
+    alias expect="${RLW} expect"
+    RLW=rlwrap
+    alias ftp="${RLW} -H ${HOME}/.ftphist --always-readline /usr/bin/ftp"
+    # alias python="${RLW} /usr/bin/python"
+    # alias python3="${RLW} -H pyhist --always-readline /opt/anaconda3/bin/python3"
+    # alias pdb="${RLW} -H pyhist --always-readline /opt/anaconda3/bin/python3 -m pdb"
+    # make python = python3
+    # alias python=$(alias python3 | sed -e 's/alias python3=//' | xargs echo)
+unset RLW
+fi
+
+[ "${OSSIEHOME}" ] && alias redhawk=${OSSIEHOME}/../ide/2.0.1/eclipse
+alias ssh-a='ssh -o "PubkeyAuthentication no" -o "IdentitiesOnly yes" -o "PreferredAuthentications password" '
+
+# Add an "alert" alias for long running commands.  Use like so:
+#   sleep 10; alert
+alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
+
+alias minicom='TERM=linux command minicom'

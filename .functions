@@ -1,0 +1,959 @@
+# .functions
+# vim: filetype=sh
+
+################################################################################
+function dofrom {
+    case $# in
+        0) echo "Usage: dofrom firstcmd [lastcmd]";;
+        1) fc -n $1;;
+        2) fc -n $1 $2;;
+    esac
+}
+
+################################################################################
+function dolast {
+    case $# in
+        0) fc -;;
+        1) fc -$1 -1;;
+        2) fc -$2 -$1;;
+    esac
+}
+
+################################################################################
+function H_ {
+    typeset -i NHISTS NCOL NLIN
+    if [ ${COLUMNS:=80} -gt 127 ]; then
+        NHIST=47; NCOL=4; NLIN=13
+    else
+        NHIST=39; NCOL=2; NLIN=20
+    fi
+    history $NHIST | \
+    gawk '{printf "%5d\t",$1;for(i=3;i<=NF;i++){printf("%s ",$i)};printf("\n");next}' \
+    | expand -t4 \
+    | pr -$NCOL -w$COLUMNS -t -s"  " 2>/dev/null
+}
+
+################################################################################
+function ipaddr {
+    case $# in
+        0) /bin/hostname --ip-address;;
+        1) nslookup $1;;
+        *) echo "Usage: ipaddr [hostname]"; return 1;;
+    esac
+}
+
+################################################################################
+function hostname {
+    case $# in
+        0) /bin/hostname --alias;;
+        *) /bin/hostname $@;;
+    esac
+}
+
+################################################################################
+function cd_ {
+#   set -xv; trap 'set +xv' RETURN
+    local cwd head tail depth thisdir
+    local wr pc ph un uh 
+    local -i i n depth maxlen avg dirlen 
+    local -a subdir
+    if [ $# -eq 1 -a ! -d "$1" ]; then
+        head=${1%%/*}
+        if [ "${head}" != "$1" ]; then # there is a subdir
+            tail=${1#*/}
+        fi
+        case ${head} in
+            git) head="${GIT_ROOT}" ;;
+            dsp) head=/home/dspteam ;;
+            rascal) head="/jdl/sources/rascal/src" ;;
+            drx) head="/jdl/sources/drx_unified_spew_overlap_working" ;;
+        esac
+        if [ -d "${head}" ]; then
+            set -- "${head}${tail:+/$tail}"
+        fi
+    fi
+    head=
+    tail=
+    
+    cd_func "$@" || return $?
+    
+    cwd="$(pwd)"
+    # remove leading HOME path
+    cwd=${cwd#$HOME}
+    n=${#cwd}
+    wr=$' '
+    
+    if [ -z "${cwd}" ]; then # we're HOME
+        cwd='~'
+    else
+        if [ "${cwd}" != "$(pwd)" ]; then # we're under HOME
+            head="~"
+        fi
+        if [ $n -ge $((COLUMNS*3/10)) ];then
+            wr='\r\n' # long path puts cursor on next line
+        fi
+        # shrink long directory
+        if [ $n -gt $((COLUMNS*2/3)) ]; then
+            maxlen=$((COLUMNS*2/3))
+            gap=$(( (n-maxlen)/2 ))
+            cwd=${head}"${cwd:0:(n/2-gap)}...${cwd:(n/2+gap)}"
+        else
+            cwd="${head}${cwd}"
+        fi
+    fi
+    # tailor depending on if it's me and I'm on my home system
+    un="${USER}"
+    case $un in
+        ljcorsa-ladm|ren-adm) un="admin"; pc="# ${RST}" ;;
+        root) un="root"; pc="# ${RST}" ;;
+        ljcorsa|ren)
+            #[ "$HOST" == "fattire" ] && un=""; pc="\$ ${RST}" ;;
+            un=""; pc="\$ ${RST}" ;;
+        *) pc="\$ ${RST}" ;;
+    esac
+    pc="${wr}${pc}"
+    case "${HOST}" in
+        fattire) 
+            if [ "${SSH_CLIENT}" ]; then
+                uh="${HOST} "
+            else
+                if [ "${un}" ]; then
+                    uh="${HOST} " 
+                else
+                    uh=""
+                fi
+            fi
+            ;;
+        ea359485)
+            uh="PC " ;;
+        *)
+            uh="${HOST} " ;;
+    esac
+    [ -n "${uh}" -a -n "${un}" ] && ph="${PURPLE}@" || ph=""
+    
+    case "$TERM" in
+        linux) unset _title ;;
+        *) _title='\001\033]0;\u@${HOST}:\w\a\002' ;;
+    esac
+    _success="${_title}${GREEN}${un}${ph}${GREEN}${uh}${LTBLUE}${cwd}${GREEN}${pc}"
+    _failure="${_title}${RED}${un}${ph}${RED}${uh}${LTBLUE}${cwd}${RED}${pc}"
+    [ "$_cdl" ] && ls $_cdl || return 0
+}
+
+################################################################################
+function cd_func {
+    # This function defines a 'cd' replacement function capable of keeping,
+    # displaying and accessing history of visited directories, up to 10 entries.
+    # To use it, uncomment it, source this file and try 'cd --'.
+    # acd_func 1.0.5, 10-nov-2004
+    # Petar Marinov, http:/geocities.com/h2428, this is public domain
+
+#    set -xv; trap 'set +xv' RETURN
+
+    local x2 newdir index
+    local -a arr
+    local -i cnt i
+
+    (($#)) && newdir="$1" || newdir="${HOME}"
+    [ "$1" == "~" ] && newdir="${HOME}"
+    
+    # cd --
+    # display the list of pushed directories, allow selection
+    if [ "${newdir}" ==  '--' -o "${newdir}" ==  '-?' ]; then
+        # capture list of dirs
+        cnt=${#DIRSTACK[*]}
+        dirs -l -v | tac
+        [ "${newdir}" ==  '--' ] && return 0
+        timeout='-t 20'
+        [ "${newdir}" ==  '-?' ] && timeout='-t 5'
+        echo -n "Select 0..$((cnt-1))${PS3:-:} "
+        read -s $timeout -N 1 index; rc=$?
+        echo 'cr\nel' | tput -S
+        ((rc)) && return 0        
+        # check requested index in range
+        index=${index//[^[:digit:]]/} # nuke all non-digits
+        [ -z "${index}" ] && return 0
+        [[ "${index}" =~ ^[[:digit:]]+$ ]] || return 1
+        [ 0 == ${index} ] && return 0
+        [ ${index} -lt $cnt ] || return 1
+        # grab the selected dir for further processing
+        newdir="${DIRSTACK[index]}"
+        [ -z "${newdir}" ] && return 1
+    
+    # cd -n
+    # jump back to the Nth folder
+    elif [[ "${newdir}" =~ ^-[[:digit:]]+$ ]]; then
+        # grab the numeric value
+        index=${newdir:1}
+        index=${index//[^[:digit:]]/}
+        [ -z "${index}" ] && index=1
+        # if zero, do nothing
+        [ 0 == ${index} ] && return 0
+        # capture list of dirs
+        cnt=${#DIRSTACK[*]}
+        # check requested index in range
+        [ ${index} -lt $cnt ] || return 1
+        [ $cnt -gt 1 ] || return 0
+        # grab the selected dir for further processing
+        newdir="${DIRSTACK[index]}"
+        [ -z "${newdir}" ] && return 1
+
+    # cd -
+    elif [[ "${newdir}" =~ ^-$ ]]; then
+        newdir=$OLDPWD
+
+    # cd -anything else
+    elif [[ "${newdir}" =~ ^- ]]; then
+        return 1
+    fi
+    
+    # try to push to new directory
+    # capture output+error and result in an array
+    local tf=$(mktemp)
+    pushd "${newdir}" >/dev/null 2>${tf}; rc=$?
+    local ERRM="$(< ${tf})"; rm -f ${tf}
+    if [ ${rc} -ne 0 ]; then 
+        echo >&2 ${ERRM/*"pushd: "/}
+        return 1
+    fi
+	
+	# add real cd command to history (HISTIGNORE should contain "cd[ ] -*")
+#	history -s cd "${PWD}"
+	pwd >> ${HOME}/.dirslist
+    
+    #  remove any other occurence of our new dir, skipping the top of the stack
+    cnt=${#DIRSTACK[*]}
+    for ((i=cnt-1;i>0;i--)); do
+#        printf "%3d %s\n" $i "${arr[i]}"
+        if [ "${DIRSTACK[i]/#~/${HOME}}" == "${DIRSTACK[0]/#~/${HOME}}" ]; then
+           popd -n +$i &>/dev/null
+        fi
+    done
+    #  trim off the 10th entry
+    popd -n +10 &>/dev/null
+    
+    #debugging?
+    [ -z "${-%%*x*}" ] && dirs -l -v | tac
+    return 0
+}
+[[ "${HISTIGNORE}" =~ "cd[ ]-*" ]] || export HISTIGNORE+=':cd[ ]-*'
+################################################################################
+function man {
+    #  try to wrap the real man(1) command for the most common usages:
+    #  a section and 1+ pages; for everything else, re-invoke the real
+    #  man command with the original arguments
+    
+    local MULTI=true # because it seems sensible (to me) for this to be the default
+    local TOO_HARD=  # options I don't feel like implementing (but send me a patch)
+    local MAN_EXE=$(type -P man)  # the "real" executable
+    
+    # trivial case: no args
+    if [ $# -eq 0 ]; then
+        "${MAN_EXE}"
+        return $?
+    fi
+    
+    local RC=0
+    local TEMP=$(getopt -o acdfFhkKtwWm:p:C:M:P:B:H:S: --long path -- "$@" ); RC=$?
+    if [ $RC -ne 0 ]; then
+        "${MAN_EXE}" $@
+        return $?
+    fi
+    
+    local ARGS="$@"
+    eval set -- "$TEMP"
+    while true; do
+        case "$1" in
+            -a) MULTI=true; shift ;;
+            -h) "${MAN_EXE}" -h ; return $? ;;
+            -c|-d|-f|-F|-k|-K|-t|-w|-W|-m|--path) TOO_HARD=true; shift ;;
+            -p|-C|-M|-P|-B|-H|-S) TOO_HARD=true; shift 2 ;;
+            --) shift; break ;;
+            *) break ;;
+        esac
+    done
+    
+    # encountered an option I don't handle. pretend I don't exist
+    if [ "${TOO_HARD}" ]; then
+        "${MAN_EXE}" $ARGS
+        return $?
+    fi
+    
+    # if no pages requested after all this...
+    if [ $# -eq 0 ]; then
+        "${MAN_EXE}"
+        return $?
+    fi
+    
+    local SECT=$1
+    if [ "${SECT}" != "${SECT#[1-9]}" ]; then
+        shift
+    else
+        SECT=
+    fi
+    
+    # if no pages requested after all this AND that...
+    if [ $# -eq 0 ]; then
+        "${MAN_EXE}"
+        return $?
+    fi
+    
+    if [ $# -gt 1 -a $1 == "git" ]; then
+        gitcmd="$1-$2"
+        shift 2
+        eval set -- "$gitcmd $@"
+    fi
+    local PAGE MP
+    while (($#)); do
+        PAGE=$1; shift
+        case "$(${MAN_EXE} 1 -W ${PAGE} 2>/dev/null)" in
+            */builtins.1.gz) MP=" -Gp '^\s{7}${PAGE} ' -Ps'builtins " ;;
+            *) MP=" -Ps'${PAGE} "
+        esac
+        if [ ${PAGE} == "git" -a $# -eq 1 ]; then
+            PAGE="$PAGE-$2"; shift
+        fi
+        MP="less -ReXs -x4 ${MP} -- p\.%db?L/%D ?Pb(%Pb\%)'"
+        ${MAN_EXE} -P "${MP}" ${SECT} ${PAGE}
+        [ -z "${MULTI}" ] && break
+    done
+    return 0
+}
+
+################################################################################
+function compute {
+    echo "scale=10;$*" | bc
+}
+
+################################################################################
+function ps {
+    if [ $# -eq 1 ]; then
+        case "$1" in
+            tree) pstree.sh; return $? ;;
+            a) command ps -N --ppid=2 -H -o pid,ppid,args; return $? ;;
+            u) command ps -u ${USER} -H -o pid,ppid,args; return $? ;;
+            e) command ps -e  -H -o pid,ppid,args; return $? ;;
+            [[:digit:]]*) command ps --noheaders -p $1 -o pid,ppid,args -ww; return $? ;;
+        esac
+    fi
+    command ps "$@"
+}
+
+################################################################################
+function pgrep {
+    if [ -t 1 ]; then
+        command pgrep "$@" | xargs -r ps -o pid,ppid,args -p
+    else
+        command pgrep "$@" 
+    fi
+}
+
+################################################################################
+function new {
+    local me=$FUNCNAME
+    local _args=$(getopt --name "${me}" -o adfn:0123456789 -- "$@")
+    if (($?)); then
+        echo "Usage: ${me} <-a|-d|-f> <-n [num]> <[-][num]> <wildcard> <folder>"
+        exit
+    fi
+    local args=( $_args )
+    local i a
+    local n="${#args[@]}"
+    local num="$(( LINES/3 < 10 ? 10 : LINES/3 ))"
+    local dir="."
+    local wildcards=
+    local filter=
+    local dirsonly=0
+    local filesonly=0
+    local digits=0
+    local in_num=0
+    local multi_wc=0
+    local dotfiles="-e '^\.'"
+    for ((i=0; i<n; i++)); do
+        a="${args[i]}"
+        case "${a}" in
+            -[0-9] ) # build a number
+                if ((in_num)); then
+                    num+=${a#-}
+                else
+                    in_num=1
+                    num=${a#-}
+                fi
+                ;;
+            -a) in_num=0
+                dotfiles=
+                ;;
+            -d) in_num=0
+                dirsonly=1
+                ;;
+            -f) in_num=0
+                filesonly=1
+                ;;
+            -n) in_num=0
+                num="${args[++i]}";
+                ;;
+        esac
+    done
+    if ((dirsonly+filesonly>1)); then
+        dirsonly=0
+        filesonly=0
+        filter=
+    fi
+    ((dirsonly)) && filter="-type d"
+    ((filesonly)) && filter="-type f"
+    while [ "$1" ]; do
+        case "$1" in
+            [1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9] ) # all numeric was probably intended as -n xxx
+                if [ -d "$1" ]; then
+                    dir="$1"
+                else
+                    num="$1"
+                fi
+                ;;
+            *\**|*\?* ) # capture wildcards
+                if [ -z "${wildcards}" ]; then
+                    wildcards="-name '$1'"
+                else
+                    wildcards+=" -o -name '$1'"
+                    multi_wc=1
+                fi
+                ;;
+            * ) if [ -d "$1" ]; then # capture directory
+                    dir="$1"
+                fi
+                ;;
+        esac
+        shift
+    done
+    if ((multi_wc)); then
+        wildcards='\( '${wildcards}' \)'
+    fi
+    cd "${dir}"
+    if [ -t 1 ]; then
+        color="always"
+    else
+        color="never"
+    fi
+    eval find . -mindepth 1 -maxdepth 1 ${filter} ${wildcards} -printf '%P\\0' 2>/dev/null |
+        eval grep -Ezvf ~/lib/new.ignore ${dotfiles} 2>/dev/null |
+        xargs -r0 command ls -dhlt --color=${color} 2>/dev/null |
+        eval head --lines=${num} 2>/dev/null
+}
+
+################################################################################
+function be {
+    type -p sudo >&/dev/null || echo >&2 "be: sudo not found"
+    local cmd
+    cmd="sudo -H su -"
+    if [ $# -eq 0 ]; then
+        $cmd root
+        return
+    fi
+    case $1 in
+        me|myself) $cmd $(logname) ;;
+        *) $cmd $1 ;;
+    esac
+    return
+}
+
+################################################################################
+function atq {
+    /usr/bin/atq "$@" |
+    awk -v user=$(logname) '$5 == user {
+        pre=sprintf("%c%05x",$4,$1)
+        printf("%s %s %s %s\n",$1,pre,$2,$3)
+    }' |
+    while read num fp dt tm
+    do
+        atfile=$(/bin/ls /var/spool/at/${fp}* 2>/dev/null)
+        # check name present, file readable, owned by me
+        [ -n "$atfile" -a -r "$atfile" -a -O "$atfile" ] || continue
+        atcmd=$(awk '
+            BEGIN { v=0; delim="" }
+            $1 ~ /SHELL/ && $2 == "<<" {
+                v=1; gsub("\047","",$3); delim=$3; next }
+            delim != "" && $1 == delim { v=0; next }
+            v==1 && $1 != delim { printf("%s", $0) }
+            END { printf("\n") }
+        ' $atfile )
+        echo "$num $dt $tm $atcmd"
+    done
+}
+
+################################################################################
+function lpoptions {
+    command lpoptions $@ |
+    sed -e 's/ \([[:alpha:]-][[:alpha:]-]*\)=/\n\1=/g' |
+    grep -Ev 'job-|marker-'
+}
+
+################################################################################
+function which {
+    local -i done=0
+    local t types=$(type -at "$1") 
+    (($?)) && return 1
+    
+    for t in ${types}; do
+        case ${t} in
+            file) ((done)) || { type -aP "$1"; done=1; } ;;
+            alias) alias "$1" ;;
+            *) echo ${t} ;;
+        esac
+    done
+}
+
+################################################################################
+function cdl {
+    [ -n "$_cdl" ] && unset _cdl || _cdl=" "
+    (($#)) && cd "$@" || ls $_cdl
+}
+
+function cdll {
+    [ -n "$_cdl" ] && unset _cdl || _cdl=" -l "
+    (($#)) && cd "$@" || ls $_cdl
+}
+
+function cdlt {
+    [ -n "$_cdl" ] && unset _cdl || _cdl=" -lt "
+    (($#)) && cd "$@" || ls $_cdl
+}
+
+################################################################################
+function eb {
+    (($#)) || return 1
+    local x=$(type -P "$1")
+    [ -n "$x" ] || return 2
+    vi "$x"
+}
+
+################################################################################
+unalias func &>/dev/null
+function func {
+    (($#)) || return 1
+    
+    typeset -f |
+    awk -v funcName="$1" '
+        # initialize: no func found
+        BEGIN { inFunc=0; exitCode=1 }
+        # look for function declaration. we can report success.
+        $1 == funcName { inFunc=1; exitCode=0 }
+        # look for (and print) closing brace in first column
+        $0 ~ /^}$/ && inFunc == 1 && NF == 1 {
+            print; inFunc=0; exit 0
+        }
+        # print everything from declaration to closing brace
+        inFunc == 1 { print }
+        # report out
+        END { exit exitCode }
+    '
+    return $?
+}
+
+################################################################################
+function realpath {
+    if [ -d "$1" ]; then
+        ( command cd -P "$1" >&/dev/null && pwd -P )
+    elif [ -f "$1" ]; then
+        if [[ $1 == */* ]]; then
+            echo $( command cd -P -- "${1%/*}" >&/dev/null && pwd -P)
+        else
+            echo "$( pwd -P )/$1"
+        fi
+    fi  
+}
+
+################################################################################
+function Find {
+    (($#)) || return 1
+
+    local top="." 
+    if [ -d "$1" ]; then
+        top="$1"
+        shift
+    fi
+    top=$(realpath "$top")
+    local findcmd="find '"$top"' -mount "
+    if [ "$top" == "$HOME" ];then
+        findcmd+=" -type d \( -path '*/.*' -o -name share \) -prune -o "
+    fi
+    local i args=("$@") printcmd="-print"
+    for ((i=0; i<${#args[@]}; i++)); do
+        unglobbed=$(tr -d ' ?*[' <<< ${args[(i)]} )
+        if [ "$unglobbed" != "${args[(i)]}" ]; then # here be meta chars
+            findcmd+="'""${args[(i)]}""' "
+        else
+            findcmd+="${args[(i)]} "
+        fi
+        # only add "-print" if there is not such already
+        [[ "${args[(i)]}" =~ "-print" ]] && printcmd=""
+    done
+    findcmd+="$printcmd"
+#   echo "$findcmd"
+    eval "$findcmd" 2>/dev/null
+    return $?
+}
+
+################################################################################
+function asctime {
+    local me=$FUNCNAME
+    if [ $# -eq 0 ] ; then
+        >&2 echo "usage: $me [epochtime]" 
+        return 1
+    fi
+
+    local nondigits=${1//[[:digit:]]/}
+    if [ ${#nondigits} -gt 0 ]; then
+        >&2 echo "$me: integer epoch time expected" 
+        return 1
+    fi
+
+    if ! test $1 -ge 0 &>/dev/null; then
+        >&2 echo "$me: integer epoch time expected" 
+        return 1
+    fi
+    gawk -v t="$1" 'BEGIN {print strftime("%m/%d/%Y %H:%M:%S", t);}'
+}
+
+################################################################################
+function whence {
+    [ -t 1 ] && type -a "$@" || type -P "$@"
+}
+
+################################################################################
+function ip2hex {
+    # split four dot-separated octets into words with semicolons for bc()
+    # pre-pend a zero onto any single-digit result
+    # remove the newlines
+    # 
+
+    local x me=$FUNCNAME
+    if [ -t 0 ]; then
+        if [ $1 ];then
+            x=$1
+        else
+            >&2 echo "usage: $me IPaddr"
+            >&2 echo "       $me < IPaddr"
+            return 1
+        fi
+    else
+        read x
+    fi
+
+    # test for proper form
+    if [ "..." != "${x//[[:digit:]]/}" ]; then
+        >&2 echo "$me: IP must have 4 dots."
+        return 1
+    fi
+    bc <<< " obase=16; ${x//./;} " | 
+        # prepend zeroes, take last 2 chars, join 4 lines
+        sed -e "s/\(.*\)/000\1/; s/\(.*\)\(..\)/\2/" |
+            sed -e "N;s/\n//;N;s/\n//;N;s/\n//;N"
+}
+
+################################################################################
+function hex2ip {
+    # split 8 hex digits into 4 pairs 
+    # convert each pair to decimal
+    # separate with dots
+
+    local x me=$FUNCNAME
+    if [ -t 0 ]; then
+        if [ $1 ];then
+            x=$1
+        else
+            >&2 echo "usage: $me hexIP"
+            >&2 echo "       $me < hexIP"
+            return 1
+        fi
+    else
+        read x
+    fi
+    if [ 8 -ne "${#x}" -o -z "${x//[[:xdigit:]]/}" ]; then
+        >&2 echo "$me: hexIP must have 8 hex digits"
+        return 1
+    fi
+
+    ( echo "ibase=16; "; sed -e 's/\(..\)/\1\; /g' <<< $x ) | bc |
+        sed -e "N;s/\n/./;N;s/\n/./;N;s/\n/./;N"
+}
+
+################################################################################
+histfmt_s() {
+    gawk --re-interval -- '
+        BEGIN {
+            newline_pending=0
+            ps=index(ENVIRON["HISTTIMEFORMAT","%s")
+        }
+        ps==1 { # HISTFORMAT is %s
+            if( $1 ~ /^[[:digit:]]{1,5}$ && $2 ~ /^[[:digit:]]{10,10}/ ) {
+                if(newline_pending) { printf "\n" }
+                ts=strftime("%m/%d/%y %H:%M:%S",substr($2,1,10))
+                printf "%5d %-17.17s ",$1,ts
+                # check whether timestamp was stuck next to 1st arg
+                arg1=substr($2,11)
+                if(length(arg1)>0) { printf "%s ", arg1 }
+                for(i=3;i<=NF;i++) { printf "%s ", $i }
+                newline_pending=1
+            } else {
+                # continuation line
+                printf "%s ", $0
+                newline_pending=1
+            }
+            next
+        }
+        { # HISTFORMAT != %s 
+            print
+        }
+        END {
+            if(newline_pending) { printf "\n" }
+        }
+    '
+}
+
+tailfilter() {
+    (($#)) || { echo "usage: ${FUNCNAME[0]} file pattern"; return 1; }
+    (
+        file=$1; shift
+        args="$@"
+        tail -F "${file}" | stdbuf -o0 grep "${args}" >&2 3>&-
+    ) 3>&1
+}
+
+sendback() {
+    (($#)) || { echo "usage: ${FUNCNAME[0]} file [file ...]"; return 1; }
+    scp -P 22722 -o "StrictHostKeyChecking no" -o "UserKnownHostsFile /dev/null" $@ ljcorsa@localhost: 2>/dev/null
+}
+
+genpasswd() {
+    declare -i n=10
+    (($#)) && n=$1
+    ((n<8)) && n=8
+    tr -dc '[[:alnum:]]_=#!@$%&*-' < /dev/urandom | head -c ${n} | xargs
+}
+
+getNickName() {
+    local a b c h ENVDIR awkscript cmd
+    HOST=
+	cmd="{command hostname -f; command hostname -a; "
+	cmd+="command hostname -i; command hostname -I; } "
+	cmd+="| tr ' ' $'\n' | sed '/^$/d' | sort -ur"
+    awkscript='BEGIN {IGNORECASE=rc=1}
+               $0 ~ h && $1=="Host" { 
+                    for(i=2;i<=NF;i++) {
+                        if ($i==h) { print $2; rc=0; exit 1}
+                    }
+               }
+               END {exit rc}'
+    if [ -z "${HOST}" -a -n "${BASH_ENV}" ]; then
+        ENVDIR=$(eval command cd $(dirname "${BASH_ENV}") && pwd)
+        if [ "${ENVDIR}" != "${HOME}" -a -r "${ENVDIR}/.ssh/config" ]; then
+           for h in $(${cmd}); do
+               HOST=$(awk -v h=${h} -- "${awkscript}" "${ENVDIR}/.ssh/config" ) && break
+           done
+        fi
+    fi
+    if [ -z "${HOST}" -a -n "${HOME}/.ssh/config" ]; then
+		for h in $( ${cmd}); do
+			HOST=$(awk -v h=${h} -- "${awkscript}" "${HOME}/.ssh/config" ) && break
+		done
+    fi
+    if [ -z "${HOST}" ]; then
+        read a b <<< $(command hostname -a)
+        HOST=${a,,}
+    fi
+    if [ -z "${HOST}" ]; then
+        IFS=$'.' read a b c <<< $(command hostname -f)
+        HOST=${a,,}${b:+.}${b,,}
+    fi
+    echo "${HOST}"
+}
+
+title() {
+    [[ "${TERM}" =~ ^(xterm|putty) ]] || return 0
+    declare title="${1:=${USER}@${HOST}}"
+    printf '\033]0;'"${title}"'\007'
+}
+
+quote() {
+    local quoted=${1//\'/\'\\\'\'}
+    printf "'%s'" "${quoted}"
+}
+
+dequote() {
+    eval printf %s "$1" 2>/dev/null
+}
+
+startAgent() {
+    local silent=1
+    [ "$1" == "-s" ] && silent=1
+    # initialize ssh-agent if no signs of one exist
+    local savedFILE savedPID FILE PID sockfiles=()
+    local -A goodpairs=()
+    local -i i n rc PIDfromname savedHasKey=0
+    : ${LOGNAME:=$(id -un)}
+    
+    # stash existing env vars
+    if [ -n "${SSH_AUTH_SOCK}" -a -n "${SSH_AGENT_PID}" ]; then
+       savedFILE="${SSH_AUTH_SOCK}"
+       savedPID="${SSH_AGENT_PID}"
+       if [[ "${savedFILE}" =~ /socket.ssh$ ]]; then
+           echo "${savedPID}" > "$(dirname ${savedFILE}/agent.pid)"
+       fi
+       ssh-add -l &>/dev/null && savedHasKey=1
+    fi
+    unset SSH_AUTH_SOCK SSH_AGENT_PID
+    sockfiles=( $(find /tmp -type s -user ${LOGNAME} -regextype posix-extended \
+       \( -regex "/tmp/ssh-.*/agent\.[[:digit]]+" \) -o \
+       \( -regex "/tmp/keyring-.*/socket.ssh" \) 2>/dev/null ) )
+    n=${#sockfiles[@]}
+    # get potential pid from files
+    for ((i=0;i<n;i++)); do 
+       FILE=${sockfiles[i]}
+       # don't touch saved
+       [ "${FILE}" == "${savedFILE}" ] && continue
+       # get agent PID associated with socket (the number after final dot)
+       if [[ "${FILE}" =~ /socket.ssh$ && -r "$(dirname ${FILE})/agent.pid" ]]; then
+           PID=$(< "$(dirname ${FILE})/agent.pid")
+           ps -fp "${PID}" &>/dev/null || unset PID
+       elif [[ "${FILE}" =~ /agent.([[:digit]]+)$ ]]; then
+           PIDfromname=${BASH_REMATCH[1]}
+           # check if PID, PPID, PID+5 match
+           PID=$(ps -fu ${LOGNAME} 2>/dev/null | 2>/dev/null awk -v p=${PIDfromname} \
+              '/ssh-agent/ && ($3==p || ($2>=p && $2<(p+5)) ) { print $2 }' )
+       else
+          unset PID
+       fi
+       
+       # tidy up files where no process running
+       if [ -z "${PID}" ]; then
+          unset sockfiles[i]
+          rm -rf $(dirname "${FILE}")
+       fi
+       # test if agent with PID is functional
+       env SSH_AUTH_SOCK=${FILE} SSH_AGENT_PID=${PID} ssh-add -l &>/dev/null
+       if [ $? -eq 2 ]; then
+          env SSH_AUTH_SOCK=${FILE} SSH_AGENT_PID=${PID} ssh-agent -k &>/dev/null
+          usleep 200
+          pkill -s SIGKILL ${PID} &>/dev/null
+          unset sockfiles[i]
+          rm -rf $(dirname "${FILE}")
+       fi
+       goodpairs[${PID}]="${FILE}"
+    done
+    # clean up agents with no keys
+    for PID in ${!goodpairs[@]}; do
+        FILE=${goodpairs[${PID}]}
+       # don't touch saved
+       [ "${FILE}" == "${savedFILE}" ] && continue
+       env SSH_AUTH_SOCK=${FILE} SSH_AGENT_PID=${PID} ssh-add -l &>/dev/null
+       if [ $? -ne 0 ]; then
+          env SSH_AUTH_SOCK=${FILE} SSH_AGENT_PID=${PID} ssh-agent -k &>/dev/null
+          usleep 200
+          pkill -s SIGKILL ${PID} &>/dev/null
+          unset sockfiles[i]
+          rm -rf $(dirname "${FILE}")
+          unset 'goodpairs[${PID}]'
+          continue
+       fi
+       # have found a running agent with valid keys! save
+       if [ -z "${savedFILE}" ]; then
+          savedFILE="${FILE}"
+          savedPID="${PID}"
+       fi
+    done
+    # use the live one found, or start a new one
+    if [ -n "${savedFILE}" ]; then
+       export SSH_AUTH_SOCK="${savedFILE}" SSH_AGENT_PID="${savedPID}"
+    else
+       eval $(ssh-agent -s)
+    fi
+    # are there keys loaded?
+    ssh-add -l &>/dev/null; rc=$?
+    if [ $rc -eq 1 ]; then
+       if [ -n "${DISPLAY}" -a -n "${SSH_ASKPASS}" ]; then
+          ssh-add <&-; rc=$?
+       else
+          ssh-add; rc=$?
+       fi
+    fi
+	if [ $rc -ne 0 ];then
+	   kill ${SSH_AGENT_PID}
+	   unset SSH_AGENT_PID SSH_AUTH_SOCK
+	   return 1
+	fi
+    export SSH_AUTH_SOCK=${SSH_AUTH_SOCK}
+    export SSH_AGENT_PID=${SSH_AGENT_PID}
+#    if [ $(basename ${SHELL}) != "${0#-}" ]; then
+#	   echo "######### SSH AGENT #######################"
+#       echo "Issue the following commands to connect to ssh agent:"
+#       echo "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}; export SSH_AUTH_SOCK"
+#       echo "SSH_AGENT_PID=${SSH_AGENT_PID}; export SSH_AGENT_PID"
+#	   echo ""
+#    else
+       ((silent)) && TODEVNULL=' &>/dev/null'
+       eval echo SSH_AUTH_SOCK=${SSH_AUTH_SOCK} SSH_AGENT_PID=${SSH_AGENT_PID} ${TODEVNULL}
+       eval ssh-add -L ${TODEVNULL}
+#    fi
+}
+
+unalias lsd &>/dev/null
+lsd() {
+    local me=$FUNCNAME dir 
+    local hidden="! -name '.*'"
+    local maxd=' -maxdepth 1'
+    while (($#)); do
+       case "$1" in 
+          -a) unset hidden; shift;;
+          -[1-9]|-[1-9][0-9]) maxd=" -maxdepth ${1#-}"; shift;;
+          -r) unset maxd; shift;;
+          -*) >&2 printf "usage: $me -a [directory]"; return 1;;
+          *) if [ -n "$dir" ]; then
+               >&2 printf "too many args\nusage: $me -a [directory]"; return 1
+             else
+                dir="$1"; shift
+             fi ;;
+       esac
+   done
+   [ -z "${dir}" ] && dir="${PWD}"
+   [ -r "${dir}" ] || printf "${me}: cannot read ${dir}"
+   (
+      exec 2>/dev/null
+      builtin cd "${dir}"
+      eval find . "${maxd}" -type d ${hidden} -printf "'%P\0'" |
+         xargs -r0 ls -d -Fh --color=auto --group-directories-first --indicator-style=none
+   )
+}
+
+unalias vars &>/dev/null
+function vars {
+    if (($#)); then
+        awk -v PAT="$@" 'BEGIN{for(i in ENVIRON){if(match(i,"BASH_FUNC_")==0 && match(i,PAT)!=0){
+        s=ENVIRON[i]
+        gsub(/[^[:print:]]/,"",s)
+        #if(length(s)>50){print(i "=" substr(s,1,50) "...")} else 
+        print(i "=" s)
+        }}}' | LANG=C LC_ALL=C LC_COLLATE=C sort
+    else
+        awk 'BEGIN{for(i in ENVIRON){if(match(i,"BASH_FUNC_")==0){
+            s=ENVIRON[i]
+            gsub(/[^[:print:]]/,"",s)
+            #if(length(s)>50){print(i "=" substr(s,1,50) "...")} else {print(i "=" s)}
+            print(i "=" s)
+        }}}' | LANG=C LC_ALL=C LC_COLLATE=C sort
+    fi
+}
+unalias funcs &>/dev/null
+function funcs {
+    if (($#)); then
+        awk -v PAT="$@" 'BEGIN{for(i in ENVIRON) {
+            if(sub("BASH_FUNC_","",i)==1){ 
+                if(match(i,PAT)!=0){gsub(/\(|\)/,"",i);print i}
+            }
+        }}' | LANG=C LC_ALL=C LC_COLLATE=C sort
+    else
+        awk 'BEGIN{for (i in ENVIRON) {
+            if(sub("BASH_FUNC_","",i)==1){gsub(/\(|\)/,"",i); print i }
+            }
+        }' | LANG=C LC_ALL=C LC_COLLATE=C sort
+    fi
+}
