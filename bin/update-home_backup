@@ -4,6 +4,7 @@ me=$(readlink -e "$0")
 me=$(basename "${me}")
 cwd="${PWD}"
 backupdir="${HOME}/.home_backup"
+comment="${me} @ $(date)"
 
 command cd "${HOME}"
 
@@ -28,7 +29,7 @@ _______________
 git status --porcelain |
     awk '$1 ~ /M/ {$1=""; $0=$0; $1=$1; printf "%s\x0", $0}' |
     xargs -r0 git add -fv
-    git commit -m "${me} $(date)"
+    git commit -m "${comment}"
 # copy git files to backup dir
 git ls-files -z |
     cpio -p0admv "${backupdir}" 2>/dev/null
@@ -38,4 +39,4 @@ command cd "${backupdir}"
 find . -name .svn -prune -o -print0 |
     xargs -0 svn add 2>/dev/null
 svn update
-svn ci -m ""
+svn ci -m "${comment}"
