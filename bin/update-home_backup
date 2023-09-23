@@ -1,6 +1,39 @@
 #!/bin/bash
+# we want to keep track of things in git version control in/under $HOME
 cwd="${PWD}"
-bkup="${HOME}/.home_backup"
-command cd "${bkup}"
+backupdir="${HOME}/.home_backup"
+
+command cd "${HOME}"
+
+:<<'_______________'
+# to establish a git repo under HOME:
+    svn co http://grmsvn.core.drs.master/svn/personal_repos/larry.corsa/home .
+    git init
+    printf '*\n!.gitignore\n' > .gitignore
+    git add .aliases .bash_profile .bashrc .functions .inputrc .vimrc
+    git add .gitconfig .gitignore
+    git add bin/hist_combiner bin/update-home_backup
+    git add bin/v492csvs.sh bin/v492csvs_100pkt.sh
+    git commit -m "initial commit"
+
+# to establish a subversion folder to keep dotfiles:
+    mkdir "${backupdir}"
+    svn mkdir http://grmsvn.core.drs.master/svn/personal_repos/larry.corsa/home
+    svn co http://grmsvn.core.drs.master/svn/personal_repos/larry.corsa/home "${backupdir}"
+_______________
+
+# update git
+git status --porcelain |
+    awk '$1 ~ /M/ {$1=""; $0=$0; $1=$1; printf "%s\x0", $0}' |
+    xargs -r0 git add -fv
+git commit -m ""
+# copy git files to backup dir
 git ls-files -z |
-    xargs -I '{}' -r0 cp -puv "${HOME}"/'{}' "${cwd}"/'{}'
+    cpio -p0admv "${backupdir}" 2>/dev/null
+
+# update backupdir to subversion
+command cd "${backupdir}"
+find . -name .svn -prune -o -print0 |
+    xargs -0 svn add 2>/dev/null
+svn update
+svn ci -m ""

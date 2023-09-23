@@ -353,22 +353,14 @@ function new {
     local me=$FUNCNAME
     local _args=$(getopt --name "${me}" -o adfn:0123456789 -- "$@")
     if (($?)); then
-        echo "Usage: ${me} <-a|-d|-f> <-n [num]> <[-][num]> <wildcard> <folder>"
-        exit
+        echo "Usage: ${me} <-a|-d|-f> <-n [num]> <[-][num]> <wildcard> <folder>" >&2
+        return 1
     fi
-    local args=( $_args )
-    local i a
-    local n="${#args[@]}"
+    local args=( $_args ) 
+    local i a n="${#args[@]}"
     local num="$(( LINES/3 < 10 ? 10 : LINES/3 ))"
-    local dir="."
-    local wildcards=
-    local filter=
-    local dirsonly=0
-    local filesonly=0
-    local digits=0
-    local in_num=0
-    local multi_wc=0
-    local dotfiles="-e '^\.'"
+    local dir="." wildcards= filter= dirsonly=0 filesonly=0 digits=0 in_num=0 multi_wc=0
+    dotfiles="-e '^\.'"
     for ((i=0; i<n; i++)); do
         a="${args[i]}"
         case "${a}" in
@@ -394,6 +386,7 @@ function new {
                 ;;
         esac
     done
+    # default is all, but allow selecting files or dirs
     if ((dirsonly+filesonly>1)); then
         dirsonly=0
         filesonly=0
@@ -401,16 +394,19 @@ function new {
     fi
     ((dirsonly)) && filter="-type d"
     ((filesonly)) && filter="-type f"
+    # parse non-options 
     while [ "$1" ]; do
         case "$1" in
-            [1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9] ) # all numeric was probably intended as -n xxx
+            # all numeric was probably intended as -n xxx
+            [1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9] ) 
                 if [ -d "$1" ]; then
                     dir="$1"
                 else
                     num="$1"
                 fi
                 ;;
-            *\**|*\?* ) # capture wildcards
+            # capture wildcards
+            *\**|*\?* )
                 if [ -z "${wildcards}" ]; then
                     wildcards="-name '$1'"
                 else
@@ -418,22 +414,25 @@ function new {
                     multi_wc=1
                 fi
                 ;;
-            * ) if [ -d "$1" ]; then # capture directory
+            # capture directory
+            * ) if [ -d "$1" ]; then 
                     dir="$1"
                 fi
                 ;;
         esac
         shift
     done
+    # wrap wildcards in parens
     if ((multi_wc)); then
         wildcards='\( '${wildcards}' \)'
     fi
-    cd "${dir}"
+    # colorize ls output if terminal connected
     if [ -t 1 ]; then
         color="always"
     else
         color="never"
     fi
+    cd "${dir}"
     eval find . -mindepth 1 -maxdepth 1 ${filter} ${wildcards} -printf '%P\\0' 2>/dev/null |
         eval grep -Ezvf ~/lib/new.ignore ${dotfiles} 2>/dev/null |
         xargs -r0 command ls -dhlt --color=${color} 2>/dev/null |
