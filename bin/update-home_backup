@@ -1,5 +1,7 @@
 #!/bin/bash
 # we want to keep track of things in git version control in/under $HOME
+me=$(readlink -e "$0")
+me=$(basename "${me}")
 cwd="${PWD}"
 backupdir="${HOME}/.home_backup"
 
@@ -26,7 +28,7 @@ _______________
 git status --porcelain |
     awk '$1 ~ /M/ {$1=""; $0=$0; $1=$1; printf "%s\x0", $0}' |
     xargs -r0 git add -fv
-git commit -m ""
+    git commit -m "${me} $(date)"
 # copy git files to backup dir
 git ls-files -z |
     cpio -p0admv "${backupdir}" 2>/dev/null
