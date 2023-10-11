@@ -432,11 +432,13 @@ function new {
     else
         color="never"
     fi
+    (
     cd "${dir}"
     eval find . -mindepth 1 -maxdepth 1 ${filter} ${wildcards} -printf '%P\\0' 2>/dev/null |
         eval grep -Ezvf ~/lib/new.ignore ${dotfiles} 2>/dev/null |
         xargs -r0 command ls -dhlt --color=${color} 2>/dev/null |
         eval head --lines=${num} 2>/dev/null
+    )
 }
 
 ################################################################################
@@ -788,19 +790,32 @@ startAgent() {
     # initialize ssh-agent if no signs of one exist
     local savedFILE savedPID FILE PID sockfiles=()
     local -A goodpairs=()
-    local -i i n rc PIDfromname savedHasKey=0
+    local -i i n rc PIDfromname
     : ${LOGNAME:=$(id -un)}
     
     # stash existing env vars
-    if [ -n "${SSH_AUTH_SOCK}" -a -n "${SSH_AGENT_PID}" ]; then
+    if [ -n "${SSH_AUTH_SOCK}" ]; then
        savedFILE="${SSH_AUTH_SOCK}"
-       savedPID="${SSH_AGENT_PID}"
+       # get agent PID associated with socket (the number after final dot)
+       if [[ "${savedFILE}" =~ /socket.ssh$ && -r "$(dirname ${savedFILE})/agent.pid" ]]; then
+           PID=$(< "$(dirname ${savedFILE})/agent.pid")
+           ps -fp "${PID}" &>/dev/null || unset PID
+       elif [[ "${savedFILE}" =~ /agent.([[:digit:]]+)$ ]]; then
+           PIDfromname=${BASH_REMATCH[1]}
+           # check if PID, PPID, PID+5 match
+           PID=$(ps -fu ${LOGNAME} 2>/dev/null | 2>/dev/null awk -v p=${PIDfromname} \
+              '/ssh-agent/ && ($3==p || ($2>=p && $2<(p+5)) ) { print $2 }' )
+       else
+          unset PID
+       fi
+       savedPID="${PID}"
        if [[ "${savedFILE}" =~ /socket.ssh$ ]]; then
            echo "${savedPID}" > "$(dirname ${savedFILE}/agent.pid)"
        fi
-       ssh-add -l &>/dev/null && savedHasKey=1
     fi
+    # temporarily clear to set mock values
     unset SSH_AUTH_SOCK SSH_AGENT_PID
+
     sockfiles=( $(find /tmp -type s -user ${LOGNAME} -regextype posix-extended \
        \( -regex "/tmp/ssh-.*/agent\.[[:digit]]+" \) -o \
        \( -regex "/tmp/keyring-.*/socket.ssh" \) 2>/dev/null ) )
@@ -814,7 +829,7 @@ startAgent() {
        if [[ "${FILE}" =~ /socket.ssh$ && -r "$(dirname ${FILE})/agent.pid" ]]; then
            PID=$(< "$(dirname ${FILE})/agent.pid")
            ps -fp "${PID}" &>/dev/null || unset PID
-       elif [[ "${FILE}" =~ /agent.([[:digit]]+)$ ]]; then
+       elif [[ "${FILE}" =~ /agent.([[:digit:]]+)$ ]]; then
            PIDfromname=${BASH_REMATCH[1]}
            # check if PID, PPID, PID+5 match
            PID=$(ps -fu ${LOGNAME} 2>/dev/null | 2>/dev/null awk -v p=${PIDfromname} \
@@ -854,7 +869,8 @@ startAgent() {
           unset 'goodpairs[${PID}]'
           continue
        fi
-       # have found a running agent with valid keys! save
+       # have found a running agent with valid keys!
+       # save unless I already found one
        if [ -z "${savedFILE}" ]; then
           savedFILE="${FILE}"
           savedPID="${PID}"

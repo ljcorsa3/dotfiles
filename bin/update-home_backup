@@ -27,7 +27,7 @@ _______________
 
 # update git
 git status --porcelain |
-    awk '$1 ~ /M/ {$1=""; $0=$0; $1=$1; printf "%s\x0", $0}' |
+    awk '$1 ~ /M|A/ {$1=""; $0=$0; $1=$1; printf "%s\x0", $0}' |
     xargs -r0 git add -fv
     git commit -m "${comment}"
 # copy git files to backup dir
