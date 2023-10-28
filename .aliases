@@ -2,9 +2,9 @@
 # vim: filetype=sh
 
 alias vnc='sudo systemctl restart vncserver.ljcorsa@:2.service'
-alias serial0="title ttyUSB0; socat READLINE,history=$HOME/hist-usb0,noprompt OPEN:/dev/ttyUSB0,b115200,cs8,nonblock,rawer"
-alias serial1="title ttyUSB1; socat READLINE,history=$HOME/hist-usb1,noprompt OPEN:/dev/ttyUSB1,b115200,cs8,nonblock,rawer"
-alias ascii='command man ascii| sed -e "/./{H;$!d;}" -e "x;/70 80 90 100/!d"'
+alias usb0="title ttyUSB0; connect USB0"
+alias usb1="title ttyUSB1; connect USB1"
+alias usb2="title ttyUSB2; connect USB2"
 alias dj='echo "1-703-296-9722"'
 alias l="command ls -m $LS_OPTIONS"
 alias la="command ls -A $LS_OPTIONS"
@@ -59,6 +59,7 @@ alias moew='more'
 alias ks='ls'
 alias kk='ll'
 alias untic=infocmp
+#alias cdh='awk \'! seen[$0]++\' "${HOME}/.dirslist" | less +G'
 alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'

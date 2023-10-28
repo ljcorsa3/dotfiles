@@ -2,16 +2,17 @@
 # combine all history files, sorted by time.
 # keep last n entries as new HISTFILE
 
-if [[ $_ != $0 ]]; then
+if (return 0 2>/dev/null); then
     isSourced=1
     LEAVE=return
+    # tidy up globals on RETURN, replace existing RETURN trap
+    [ "$(trap -p RETURN)" ] && RET_TRAP=$(trap -p RETURN) || RET_TRAP='trap - RETURN'
+    trap 'eval "$RET_TRAP"; unset isSourced LEAVE REGEX FILES AWKSCRIPT MAX rc RET_TRAP' RETURN
     [ "${HISTFILE}" ] || ${LEAVE} 1
 else
     isSourced=0
     LEAVE=exit
 fi
-# tidy up globals
-trap 'unset isSourced LEAVE REGEX FILES AWKSCRIPT MAX rc' RETURN
 
 [ -d ~/.bash_history ] || ${LEAVE} 1
 
@@ -21,8 +22,7 @@ REGEX+='[[:digit:]]{6}.*'
 REGEX+="-${HOST}-"
 REGEX+='.*'
 FILES=( $(find ~/.bash_history -mindepth 1 -maxdepth 1 \
-    -regextype posix-egrep -regex "${REGEX}" -print)
-)
+    -regextype posix-egrep -regex "${REGEX}" -print) )
 ((${#FILES[@]})) || $LEAVE 1
 
 # store the awk script

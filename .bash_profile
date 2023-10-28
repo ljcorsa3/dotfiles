@@ -59,14 +59,12 @@ fi
 # export everything in this script (turn off at end)
 set -a
 
-# # if launched from ssh, grab our remote client info
-# if [ -n "${SSH_CLIENT}" ]; then
-#     SSH_CLIENT_IP="${SSH_CLIENT%%[[:space:]]*}"
-#     # SSH_CLIENT_NAME=$(nslookup ${SSH_CLIENT_IP} 2>/dev/null |
-#     #   awk '/name = / {sub(/\.$/,"",$NF); print $NF}')
-#     SSH_CLIENT_NAME=$(dig +search +time=1 +short +4 -x ${SSH_CLIENT_IP} \
-#         2>/dev/null | sed -e 's/\.$//')
-# fi
+# if launched from ssh, grab our remote client info
+if [ -n "${SSH_CLIENT}" ]; then
+    SSH_CLIENT_IP="${SSH_CLIENT%%[[:space:]]*}"
+    SSH_CLIENT_NAME=$(dig +search +time=1 +short -4 -x ${SSH_CLIENT_IP} \
+        2>/dev/null | sed -e 's/\.$//')
+fi
 
 # initialize important env vars
 TMOUT=0
@@ -245,7 +243,7 @@ fi
 # host-specific history
 TTY=$(tty | sed -e 's^/dev/^^' -e 's^/^^')
 if [[ "${USER,,}" =~ (pi|ren|ljcorsa) ]]; then
-    if [ -f ${HOME}/.bash_history ]; then
+    if [ -f ${HOME}/.bash_history ]; then # convert to a directory
         TMPHIST=$(mktemp)
         mv "${HOME}/.bash_history" "${TMPHIST}"
         mkdir "${HOME}/.bash_history"
@@ -256,7 +254,7 @@ if [[ "${USER,,}" =~ (pi|ren|ljcorsa) ]]; then
     HISTFILESIZE=0
     HISTCONTROL=erasedups
     HISTIGNORE="l:l[als]:h:hh:H:HH:history:[bf]g:exit"
-    HISTIGNORE+=":cd:cdl:cdl[lta]:cd *:cdl *:cdl[lta] *"
+    #HISTIGNORE+=":cd:cdl:cdl[lta]:cd *:cdl *:cdl[lta] *"
     HISTFILESIZE=2200
     HISTSIZE=2000
     source ~/bin/hist_combiner
@@ -293,20 +291,22 @@ if [ -r "${HOME}/.dirslist" ]; then
     unset i arr
 fi
 
-if ((0)); then
 # remove duplicates in PATH
 PATH=$( printf '%s' "${PATH}" | 
     awk -v RS=':' '!($0 in a){a[$0];printf("%s%s",length(a)>1?":":"",$0)}' )
-if [ "${WSL2}" == "1" ] && type -p wsl2-ssh-pageant &>/dev/null; then
-	export SSH_AUTH_SOCK="$HOME/.ssh/agent.sock"
-	rm -f ${SSH_AUTH_SOCK}
-	(
-		setsid nohup socat UNIX-LISTEN:"$SSH_AUTH_SOCK,fork" EXEC:wsl2-ssh-pageant &>/dev/null &
-		disown
-	)
-elif typeset -F startAgent &>/dev/null; then
-	startAgent -s
-fi
+
+# maybe connect ssh-agent to WSL someday
+if ((0)); then
+    if [ "${WSL2}" == "1" ] && type -p wsl2-ssh-pageant &>/dev/null; then
+        export SSH_AUTH_SOCK="$HOME/.ssh/agent.sock"
+        rm -f ${SSH_AUTH_SOCK}
+        (
+            setsid nohup socat UNIX-LISTEN:"$SSH_AUTH_SOCK,fork" EXEC:wsl2-ssh-pageant &>/dev/null &
+            disown
+        )
+    elif typeset -F startAgent &>/dev/null; then
+        startAgent -s
+    fi
 fi
 
 # stop exporting vars
