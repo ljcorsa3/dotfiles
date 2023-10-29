@@ -18,9 +18,10 @@
     addm = "!f() { git status --porcelain |\
         awk '$1 ~ /A|M/ {$1=\"\"; $0=$0; $1=$1; printf \"%s\\x0\", $0}' |\
         xargs -r0 git add -fv; }; f"
-    ls = ls-files
+    ls = "!f() { git ls-files -z |\
+        xargs -r0 ls -ad -1 -Fh --color=auto; }; f"
     ll = "!f() { git ls-files -z |\
-        xargs -r0 ls -lad; }; f"
+        xargs -r0 ls -lad -Fh --color=auto; }; f"
     log1 = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
 	alias   = config --get-regexp '^alias\\.'
 	aliases = config --get-regexp '^alias\\.'
