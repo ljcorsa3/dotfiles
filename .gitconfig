@@ -19,6 +19,8 @@
         awk '$1 ~ /A|M/ {$1=\"\"; $0=$0; $1=$1; printf \"%s\\x0\", $0}' |\
         xargs -r0 git add -fv; }; f"
     ls = ls-files
+    ll = "!f() { git ls-files -z |\
+        xargs -r0 ls -lad; }; f"
     log1 = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
 	alias   = config --get-regexp '^alias\\.'
 	aliases = config --get-regexp '^alias\\.'
