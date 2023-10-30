@@ -15,6 +15,7 @@ command cd "${HOME}"
     printf '*\n!.gitignore\n' > .gitignore
     git add .aliases .bash_profile .bashrc .functions .inputrc .vimrc
     git add .gitconfig .gitignore
+    git add .ssh/config
     git add bin/hist_combiner bin/update-home_backup
     git add bin/v492csvs.sh bin/v492csvs_100pkt.sh
     git commit -m "initial commit"
@@ -32,11 +33,6 @@ git status --porcelain |
     git commit -m "${comment}"
 # copy git files to backup dir
 git ls-files -z |
-    cpio -p0admv "${backupdir}" 2>/dev/null
-
-# update backupdir to subversion
-command cd "${backupdir}"
-find . -name .svn -prune -o -print0 |
-    xargs -0 svn add 2>/dev/null
+    xargs -r0 svn add --parents 2>/dev/null
 svn update
 svn ci -m "${comment}"
