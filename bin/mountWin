@@ -1,0 +1,43 @@
+#!/bin/bash
+ME=$(readlink -f "${BASH_SOURCE[0]}")
+ME=$(basename "${ME}")
+errm=$(mktemp)
+trap 'rm -f $errm' 0 1 2 3 15
+die() {
+    # forcibly print error message and exit
+    local msg="${ME}: "
+    (($#)) && msg+="$@" || msg+="unspecified error."
+    printf '%s\n' "$msg" >&2
+    exit 1
+}
+
+declare -A MOUNTPTS SHARES
+WINUSER="larry.corsa"
+WINDOM="CORE"
+MOUNTPTS['F']="/home/ljcorsa/mnt/F"
+MOUNTPTS['G']="/home/ljcorsa/mnt/G"
+SHARES['F']="//grm1pfs01p/sys/Public/ljcorsa"
+SHARES['G']="//frd1vdevnet01p/data/Germantown/ljcorsa"
+
+read -rs -p "Windows password for ${WINDOM}\\${WINUSER}: " PASSWD
+echo 'cr\nel' | tput -S
+
+[ "${PASSWD}" ] || die "Windows password required!"
+
+OPTS="domain=${WINDOM},username=${WINUSER},rw,uid=$(id -u),gid=$(id -g),vers=3.0"
+
+for drv in "${!MOUNTPTS[@]}"; do
+    if mount | awk -v d="${MOUNTPTS[$drv]}" 'BEGIN{rc=1} $3==d {rc=0} END{exit rc}' &>/dev/null; then
+        sudo umount "${MOUNTPTS[$drv]}" &>/dev/null
+    fi
+done
+
+for drv in "${!MOUNTPTS[@]}"; do
+    mkdir -p "${drv}"
+    chmod 755 "${drv}"
+    if sudo PASSWD="${PASSWD}" mount.cifs "${SHARES[$drv]}" "${MOUNTPTS[$drv]}" -o ${OPTS} 2>${errm}; then
+        mount |
+            awk -v d="${MOUNTPTS[$drv]}" 'BEGIN{rc=1} $3==d {rc=0; print $0} END{exit rc}' 2>/dev/null |
+            cut -c 1-$((COLUMNS-2))
+    fi
+done
