@@ -27,6 +27,6 @@
 	aliases = config --get-regexp '^alias\\.'
     last = "!f() { for i in $(git ls-files); do \
         x=$(git --no-pager log -1 --pretty=format:"%cr" "$i"); \
-        printf "%-25.25s%s\n" "$i" "$x"; \
+        printf \"%-25.25s %s\\x0a\" \"$i\" \"$x\"; \
         done; }; f"
-
+# vim: nu
