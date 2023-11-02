@@ -787,7 +787,7 @@ dequote() {
     eval printf %s "$1" 2>/dev/null
 }
 
-pidFromSockFile() {
+getAgentPIDfromSockfile() {
     local FILE="$1"
     local PID PIDfromname
     # get agent PID associated with socket (the number after final dot)
@@ -814,22 +814,25 @@ pidFromSockFile() {
 
 useAgent() {
     if ssh-add -l &>/dev/null; then # we have keys loaded, we're done
-        [ "${SSH_AGENT_PID}" ] || SSH_AGENT_PID=$(pidFromSockFile "${SSH_AUTH_SOCK}")
+        [ "${SSH_AGENT_PID}" ] || SSH_AGENT_PID=$(getAgentPIDfromSockfile "${SSH_AUTH_SOCK}")
         return 0
     fi
-    # try all the sockets we 
+    # try all the sockets we can think of
     local SOCK SOCKS=()
     mapfile -t SOCKS < <( find /tmp -type s -user ${LOGNAME} -regextype posix-extended \
         \( -regex "/tmp/ssh-.*/agent\.[[:digit:]]+" \) \
         -o \( -regex "/tmp/keyring-.*/socket.ssh" \) 2>/dev/null )
-    [ -S /run/user/$(id -u)/keyring/ssh ] && SOCKS+=( "/run/user/$(id -u)/keyring/ssh" )
+    # prepend gnome keyring 
+    [ -S /run/user/$(id -u)/keyring/ssh ] && SOCKS=( "/run/user/$(id -u)/keyring/ssh" "${SOCKS[@]}" )
     for SOCK in "${SOCKS[@]}" ; do
+        # test if this socket is supported by an agent
         if env SSH_AUTH_SOCK="${SOCK}" ssh-add -l &>/dev/null; then
             export SSH_AUTH_SOCK="${SOCK}"
-            [ "${SSH_AGENT_PID}" ] || SSH_AGENT_PID=$(pidFromSockFile "${SSH_AUTH_SOCK}")
+            [ "${SSH_AGENT_PID}" ] || SSH_AGENT_PID=$(getAgentPIDfromSockfile "${SSH_AUTH_SOCK}")
             return 0
         fi
     done
+    # no existing agent.  populate the one we started with
     if [ -n "${DISPLAY}" -a -n "${SSH_ASKPASS}" ]; then
         ssh-add ~/.ssh/id_* <&-
     else
@@ -839,7 +842,6 @@ useAgent() {
 
 startAgent() {
     return
-
     # initialize ssh-agent if no signs of one exist
     local silent=1
     [ "$1" == "-s" ] && silent=1
@@ -854,7 +856,7 @@ startAgent() {
     fi
     if [ "${SSH_AUTH_SOCK}" ]; then
         savedFILE="${SSH_AUTH_SOCK}"
-        [ "${savedPID}" ] ||  savedPID=$(pidFromSockFile "${savedFILE}")
+        [ "${savedPID}" ] ||  savedPID=$(getAgentPIDfromSockfile "${savedFILE}")
     fi
 
     # temporarily clear to set mock values
@@ -870,7 +872,7 @@ startAgent() {
         # don't touch saved
         [ "${FILE}" == "${savedFILE}" ] && continue
         # get agent PID associated with socket (the number after final dot)
-        PID=$(pidFromSockFile "${savedFILE}")
+        PID=$(getAgentPIDfromSockfile "${savedFILE}")
         # tidy up files where no process running
         if [ -z "${PID}" ]; then
             unset sockfiles[i]
