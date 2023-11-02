@@ -25,4 +25,8 @@
     log1 = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
 	alias   = config --get-regexp '^alias\\.'
 	aliases = config --get-regexp '^alias\\.'
+    last = "!f() { for i in $(git ls-files); do \
+        x=$(git --no-pager log -1 --pretty=format:"%cr" "$i"); \
+        printf "%-25.25s%s\n" "$i" "$x"; \
+        done; }; f"
 
