@@ -185,6 +185,7 @@ if [[ $(readlink -f "${BASH_SOURCE[0]}") == "${HOME}/.bash_profile" ]]; then
         source "${HOME}/.bashrc"
     fi
 fi
+typeset -F useAgent &>/dev/null && useAgent
 
 #get nickname for HOST
 typeset -F getNickname &>/dev/null && HOST=$(getNickname)

@@ -52,7 +52,7 @@ function hostname {
 
 ################################################################################
 function cd_ {
-#   set -xv; trap 'set +xv' RETURN
+    #set -xv -o functrace; trap 'trap - RETURN; set +xv +o functrace' RETURN
     local cwd head tail depth thisdir
     local wr pc ph un uh 
     local -i i n depth maxlen avg dirlen 
@@ -137,8 +137,27 @@ function cd_ {
     esac
     _success="${_title}${GREEN}${un}${ph}${GREEN}${uh}${LTBLUE}${cwd}${GREEN}${pc}"
     _failure="${_title}${RED}${un}${ph}${RED}${uh}${LTBLUE}${cwd}${RED}${pc}"
-    [ "$_cdl" ] && ls $_cdl || return 0
+    [[ "$@" == "--" ]] && return 0
+    [ "$_cdl" ] && ls $_cdl 
+    return 0
 }
+
+################################################################################
+function cdl {
+    [ -n "$_cdl" ] && unset _cdl || _cdl=" "
+    (($#)) && cd "$@" || return 0 #ls $_cdl
+}
+
+function cdll {
+    [ -n "$_cdl" ] && unset _cdl || _cdl=" -l "
+    (($#)) && cd "$@" || return 0 #ls $_cdl
+}
+
+function cdlt {
+    [ -n "$_cdl" ] && unset _cdl || _cdl=" -lt "
+    (($#)) && cd "$@" || return 0 #ls $_cdl
+}
+
 
 ################################################################################
 function cd_func {
@@ -504,22 +523,6 @@ function which {
 }
 
 ################################################################################
-function cdl {
-    [ -n "$_cdl" ] && unset _cdl || _cdl=" "
-    (($#)) && cd "$@" || ls $_cdl
-}
-
-function cdll {
-    [ -n "$_cdl" ] && unset _cdl || _cdl=" -l "
-    (($#)) && cd "$@" || ls $_cdl
-}
-
-function cdlt {
-    [ -n "$_cdl" ] && unset _cdl || _cdl=" -lt "
-    (($#)) && cd "$@" || ls $_cdl
-}
-
-################################################################################
 function eb {
     (($#)) || return 1
     local x=$(type -P "$1")
@@ -784,131 +787,162 @@ dequote() {
     eval printf %s "$1" 2>/dev/null
 }
 
+pidFromSockFile() {
+    local FILE="$1"
+    local PID PIDfromname
+    # get agent PID associated with socket (the number after final dot)
+    if [[ "${FILE}" =~ /socket.ssh$ || "${FILE}" =~ /run/user/$(id -u)/keyring/ssh ]]; then
+        if [ -r "$(dirname ${FILE})/agent.pid" ]; then
+            PID=$(< "$(dirname ${FILE})/agent.pid")
+        fi
+    elif [[ "${FILE}" =~ /agent.([[:digit:]]+)$ ]]; then
+        PIDfromname=${BASH_REMATCH[1]}
+        # check if PID, PPID, or PID+5 match
+        PID=$(ps -fu ${LOGNAME} 2>/dev/null | 2>/dev/null awk -v p=${PIDfromname} \
+            '/ssh-agent/ && ($3==p || ($2>=p && $2<(p+5)) ) { print $2 }' )
+    fi
+    if [ "${PID}" ]; then
+        ps -fp "${PID}" &>/dev/null || unset PID
+    fi
+    if [ "${PID}" ]; then
+        echo "${PID}" > "$(dirname ${FILE}/agent.pid)"
+        echo "${PID}"
+        return 0
+    fi
+    return 1
+}
+
+useAgent() {
+    if ssh-add -l &>/dev/null; then # we have keys loaded, we're done
+        [ "${SSH_AGENT_PID}" ] || SSH_AGENT_PID=$(pidFromSockFile "${SSH_AUTH_SOCK}")
+        return 0
+    fi
+    # try all the sockets we 
+    local SOCK SOCKS=()
+    mapfile -t SOCKS < <( find /tmp -type s -user ${LOGNAME} -regextype posix-extended \
+        \( -regex "/tmp/ssh-.*/agent\.[[:digit:]]+" \) \
+        -o \( -regex "/tmp/keyring-.*/socket.ssh" \) 2>/dev/null )
+    [ -S /run/user/$(id -u)/keyring/ssh ] && SOCKS+=( "/run/user/$(id -u)/keyring/ssh" )
+    for SOCK in "${SOCKS[@]}" ; do
+        if env SSH_AUTH_SOCK="${SOCK}" ssh-add -l &>/dev/null; then
+            export SSH_AUTH_SOCK="${SOCK}"
+            [ "${SSH_AGENT_PID}" ] || SSH_AGENT_PID=$(pidFromSockFile "${SSH_AUTH_SOCK}")
+            return 0
+        fi
+    done
+    if [ -n "${DISPLAY}" -a -n "${SSH_ASKPASS}" ]; then
+        ssh-add ~/.ssh/id_* <&-
+    else
+        ssh-add ~/.ssh/id_* 
+    fi
+}
+
 startAgent() {
+    return
+
+    # initialize ssh-agent if no signs of one exist
     local silent=1
     [ "$1" == "-s" ] && silent=1
-    # initialize ssh-agent if no signs of one exist
     local savedFILE savedPID FILE PID sockfiles=()
     local -A goodpairs=()
     local -i i n rc PIDfromname
     : ${LOGNAME:=$(id -un)}
-    
+
     # stash existing env vars
-    if [ -n "${SSH_AUTH_SOCK}" ]; then
-       savedFILE="${SSH_AUTH_SOCK}"
-       # get agent PID associated with socket (the number after final dot)
-       if [[ "${savedFILE}" =~ /socket.ssh$ && -r "$(dirname ${savedFILE})/agent.pid" ]]; then
-           PID=$(< "$(dirname ${savedFILE})/agent.pid")
-           ps -fp "${PID}" &>/dev/null || unset PID
-       elif [[ "${savedFILE}" =~ /agent.([[:digit:]]+)$ ]]; then
-           PIDfromname=${BASH_REMATCH[1]}
-           # check if PID, PPID, PID+5 match
-           PID=$(ps -fu ${LOGNAME} 2>/dev/null | 2>/dev/null awk -v p=${PIDfromname} \
-              '/ssh-agent/ && ($3==p || ($2>=p && $2<(p+5)) ) { print $2 }' )
-       else
-          unset PID
-       fi
-       savedPID="${PID}"
-       if [[ "${savedFILE}" =~ /socket.ssh$ ]]; then
-           echo "${savedPID}" > "$(dirname ${savedFILE}/agent.pid)"
-       fi
+    if [ "${SSH_AGENT_PID}" ]; then 
+        savedPID="${SSH_AGENT_PID}" 
     fi
+    if [ "${SSH_AUTH_SOCK}" ]; then
+        savedFILE="${SSH_AUTH_SOCK}"
+        [ "${savedPID}" ] ||  savedPID=$(pidFromSockFile "${savedFILE}")
+    fi
+
     # temporarily clear to set mock values
     unset SSH_AUTH_SOCK SSH_AGENT_PID
-
     sockfiles=( $(find /tmp -type s -user ${LOGNAME} -regextype posix-extended \
-       \( -regex "/tmp/ssh-.*/agent\.[[:digit]]+" \) -o \
-       \( -regex "/tmp/keyring-.*/socket.ssh" \) 2>/dev/null ) )
+        \( -regex "/tmp/ssh-.*/agent\.[[:digit]]+" \) -o \
+        \( -regex "/tmp/keyring-.*/socket.ssh" \) 2>/dev/null ) )
+    [ -S /run/user/$(id -u)/keyring/ssh ] && sockfiles+="/run/user/$(id -u)/keyring/ssh"
     n=${#sockfiles[@]}
     # get potential pid from files
     for ((i=0;i<n;i++)); do 
-       FILE=${sockfiles[i]}
-       # don't touch saved
-       [ "${FILE}" == "${savedFILE}" ] && continue
-       # get agent PID associated with socket (the number after final dot)
-       if [[ "${FILE}" =~ /socket.ssh$ && -r "$(dirname ${FILE})/agent.pid" ]]; then
-           PID=$(< "$(dirname ${FILE})/agent.pid")
-           ps -fp "${PID}" &>/dev/null || unset PID
-       elif [[ "${FILE}" =~ /agent.([[:digit:]]+)$ ]]; then
-           PIDfromname=${BASH_REMATCH[1]}
-           # check if PID, PPID, PID+5 match
-           PID=$(ps -fu ${LOGNAME} 2>/dev/null | 2>/dev/null awk -v p=${PIDfromname} \
-              '/ssh-agent/ && ($3==p || ($2>=p && $2<(p+5)) ) { print $2 }' )
-       else
-          unset PID
-       fi
-       
-       # tidy up files where no process running
-       if [ -z "${PID}" ]; then
-          unset sockfiles[i]
-          rm -rf $(dirname "${FILE}")
-       fi
-       # test if agent with PID is functional
-       env SSH_AUTH_SOCK=${FILE} SSH_AGENT_PID=${PID} ssh-add -l &>/dev/null
-       if [ $? -eq 2 ]; then
-          env SSH_AUTH_SOCK=${FILE} SSH_AGENT_PID=${PID} ssh-agent -k &>/dev/null
-          usleep 200
-          pkill -s SIGKILL ${PID} &>/dev/null
-          unset sockfiles[i]
-          rm -rf $(dirname "${FILE}")
-       fi
-       goodpairs[${PID}]="${FILE}"
+        FILE=${sockfiles[i]}
+        # don't touch saved
+        [ "${FILE}" == "${savedFILE}" ] && continue
+        # get agent PID associated with socket (the number after final dot)
+        PID=$(pidFromSockFile "${savedFILE}")
+        # tidy up files where no process running
+        if [ -z "${PID}" ]; then
+            unset sockfiles[i]
+            rm -rf $(dirname "${FILE}")
+        fi
+        # test if agent with PID is functional
+        env SSH_AUTH_SOCK=${FILE} SSH_AGENT_PID=${PID} ssh-add -l &>/dev/null
+        if [ $? -eq 2 ]; then
+            env SSH_AUTH_SOCK=${FILE} SSH_AGENT_PID=${PID} ssh-agent -k &>/dev/null
+            usleep 200
+            pkill -s SIGKILL ${PID} &>/dev/null
+            unset sockfiles[i]
+            rm -rf $(dirname "${FILE}")
+        fi
+        goodpairs[${PID}]="${FILE}"
     done
     # clean up agents with no keys
     for PID in ${!goodpairs[@]}; do
         FILE=${goodpairs[${PID}]}
-       # don't touch saved
-       [ "${FILE}" == "${savedFILE}" ] && continue
-       env SSH_AUTH_SOCK=${FILE} SSH_AGENT_PID=${PID} ssh-add -l &>/dev/null
-       if [ $? -ne 0 ]; then
-          env SSH_AUTH_SOCK=${FILE} SSH_AGENT_PID=${PID} ssh-agent -k &>/dev/null
-          usleep 200
-          pkill -s SIGKILL ${PID} &>/dev/null
-          unset sockfiles[i]
-          rm -rf $(dirname "${FILE}")
-          unset 'goodpairs[${PID}]'
-          continue
-       fi
-       # have found a running agent with valid keys!
-       # save unless I already found one
-       if [ -z "${savedFILE}" ]; then
-          savedFILE="${FILE}"
-          savedPID="${PID}"
-       fi
+        # don't touch saved
+        [ "${FILE}" == "${savedFILE}" ] && continue
+        env SSH_AUTH_SOCK=${FILE} SSH_AGENT_PID=${PID} ssh-add -l &>/dev/null
+        if [ $? -ne 0 ]; then
+            env SSH_AUTH_SOCK=${FILE} SSH_AGENT_PID=${PID} \
+                ssh-agent -k &>/dev/null
+            usleep 200
+            pkill -s SIGKILL ${PID} &>/dev/null
+            unset sockfiles[i]
+            rm -rf $(dirname "${FILE}")
+            unset 'goodpairs[${PID}]'
+            continue
+        fi
+        # have found a running agent with valid keys!
+        # save unless I already found one
+        if [ -z "${savedFILE}" ]; then
+            savedFILE="${FILE}"
+            savedPID="${PID}"
+        fi
     done
     # use the live one found, or start a new one
     if [ -n "${savedFILE}" ]; then
-       export SSH_AUTH_SOCK="${savedFILE}" SSH_AGENT_PID="${savedPID}"
+        export SSH_AUTH_SOCK="${savedFILE}" SSH_AGENT_PID="${savedPID}"
     else
-       eval $(ssh-agent -s)
+        eval $(ssh-agent -s)
     fi
     # are there keys loaded?
     ssh-add -l &>/dev/null; rc=$?
     if [ $rc -eq 1 ]; then
-       if [ -n "${DISPLAY}" -a -n "${SSH_ASKPASS}" ]; then
-          ssh-add <&-; rc=$?
-       else
-          ssh-add; rc=$?
-       fi
+        if [ -n "${DISPLAY}" -a -n "${SSH_ASKPASS}" ]; then
+            ssh-add <&-; rc=$?
+        else
+            ssh-add; rc=$?
+        fi
     fi
-	if [ $rc -ne 0 ];then
-	   kill ${SSH_AGENT_PID}
-	   unset SSH_AGENT_PID SSH_AUTH_SOCK
-	   return 1
-	fi
+    if [ $rc -ne 0 ];then
+        kill ${SSH_AGENT_PID}
+        unset SSH_AGENT_PID SSH_AUTH_SOCK
+        return 1
+    fi
     export SSH_AUTH_SOCK=${SSH_AUTH_SOCK}
     export SSH_AGENT_PID=${SSH_AGENT_PID}
-#    if [ $(basename ${SHELL}) != "${0#-}" ]; then
-#	   echo "######### SSH AGENT #######################"
-#       echo "Issue the following commands to connect to ssh agent:"
-#       echo "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}; export SSH_AUTH_SOCK"
-#       echo "SSH_AGENT_PID=${SSH_AGENT_PID}; export SSH_AGENT_PID"
-#	   echo ""
-#    else
-       ((silent)) && TODEVNULL=' &>/dev/null'
-       eval echo SSH_AUTH_SOCK=${SSH_AUTH_SOCK} SSH_AGENT_PID=${SSH_AGENT_PID} ${TODEVNULL}
-       eval ssh-add -L ${TODEVNULL}
-#    fi
+    #    if [ $(basename ${SHELL}) != "${0#-}" ]; then
+    #	   echo "######### SSH AGENT #######################"
+    #       echo "Issue the following commands to connect to ssh agent:"
+    #       echo "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}; export SSH_AUTH_SOCK"
+    #       echo "SSH_AGENT_PID=${SSH_AGENT_PID}; export SSH_AGENT_PID"
+    #	   echo ""
+    #    else
+    ((silent)) && TODEVNULL=' &>/dev/null'
+    eval echo SSH_AUTH_SOCK=${SSH_AUTH_SOCK} SSH_AGENT_PID=${SSH_AGENT_PID} ${TODEVNULL}
+    eval ssh-add -L ${TODEVNULL}
+    #    fi
 }
 
 unalias lsd &>/dev/null
