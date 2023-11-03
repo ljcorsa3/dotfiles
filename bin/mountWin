@@ -16,8 +16,8 @@ WINUSER="larry.corsa"
 WINDOM="CORE"
 MOUNTPTS['F']="/home/ljcorsa/mnt/F"
 MOUNTPTS['G']="/home/ljcorsa/mnt/G"
-SHARES['F']="//grm1pfs01p/sys/Public/ljcorsa"
-SHARES['G']="//frd1vdevnet01p/data/Germantown/ljcorsa"
+SHARES['F']="//grm1pfs01p/sys/Public"
+SHARES['G']="//frd1vdevnet01p/data/Germantown"
 
 read -rs -p "Windows password for ${WINDOM}\\${WINUSER}: " PASSWD
 echo 'cr\nel' | tput -S

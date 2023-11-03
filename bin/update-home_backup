@@ -4,13 +4,12 @@ me=$(readlink -e "$0")
 me=$(basename "${me}")
 cwd="${PWD}"
 backupdir="${HOME}/.home_backup"
-comment="${me} @ $(date)"
+comment="auto" #"${me} @ $(date)"
 
 command cd "${HOME}"
 
-:<<'_______________'
+:<<'_______________' # fancy way to make block comment
 # to establish a git repo under HOME:
-    svn co http://grmsvn.core.drs.master/svn/personal_repos/larry.corsa/home .
     git init
     printf '*\n!.gitignore\n' > .gitignore
     git add .aliases .bash_profile .bashrc .functions .inputrc .vimrc
@@ -21,15 +20,19 @@ command cd "${HOME}"
     git commit -m "initial commit"
 
 # to establish a subversion folder to keep dotfiles:
-    mkdir "${backupdir}"
     svn mkdir http://grmsvn.core.drs.master/svn/personal_repos/larry.corsa/home
-    svn co http://grmsvn.core.drs.master/svn/personal_repos/larry.corsa/home "${backupdir}"
+    command cd ${HOME}; command cd ..
+    svn co http://grmsvn.core.drs.master/svn/personal_repos/larry.corsa/home ljcorsa
+    command cd ${HOME}
+    svn propset svn:ignore \* . --recursive
+    # mkdir "${backupdir}"
+    # svn co http://grmsvn.core.drs.master/svn/personal_repos/larry.corsa/home "${backupdir}"
 _______________
 
 # update git
 git status --porcelain |
-    awk '$1 ~ /M|A/ {$1=""; $0=$0; $1=$1; printf "%s\x0", $0}' |
-    xargs -r0 git add -fv
+    awk '$1 ~ /M|A/ {$1=""; $0=$0; $1=$1; printf "%s\x0", $0}' \
+        | xargs -r0 git add -fv
     git commit -m "${comment}"
 # copy git files to backup dir
 git ls-files -z |
