@@ -682,7 +682,7 @@ function hex2ip {
 }
 
 ################################################################################
-histfmt_s() {
+function histfmt_s {
     gawk --re-interval -- '
         BEGIN {
             newline_pending=0
@@ -714,7 +714,7 @@ histfmt_s() {
     '
 }
 
-tailfilter() {
+function tailfilter {
     (($#)) || { echo "usage: ${FUNCNAME[0]} file pattern"; return 1; }
     (
         file=$1; shift
@@ -723,19 +723,19 @@ tailfilter() {
     ) 3>&1
 }
 
-sendback() {
+function sendback {
     (($#)) || { echo "usage: ${FUNCNAME[0]} file [file ...]"; return 1; }
     scp -P 22722 -o "StrictHostKeyChecking no" -o "UserKnownHostsFile /dev/null" $@ ljcorsa@localhost: 2>/dev/null
 }
 
-genpasswd() {
+function genpasswd {
     declare -i n=10
     (($#)) && n=$1
     ((n<8)) && n=8
     tr -dc '[[:alnum:]]_=#!@$%&*-' < /dev/urandom | head -c ${n} | xargs
 }
 
-getNickName() {
+function getNickName {
     local a b c h ENVDIR awkscript cmd
     HOST=
 	cmd="{command hostname -f; command hostname -a; "
@@ -772,22 +772,22 @@ getNickName() {
     echo "${HOST}"
 }
 
-title() {
+function title {
     [[ "${TERM}" =~ ^(xterm|putty) ]] || return 0
     declare title="${1:=${USER}@${HOST}}"
     printf '\033]0;'"${title}"'\007'
 }
 
-quote() {
+function quote {
     local quoted=${1//\'/\'\\\'\'}
     printf "'%s'" "${quoted}"
 }
 
-dequote() {
+function dequote {
     eval printf %s "$1" 2>/dev/null
 }
 
-getAgentPIDfromSockfile() {
+function getAgentPIDfromSockfile {
     local FILE="$1"
     local PID PIDfromname
     # get agent PID associated with socket (the number after final dot)
@@ -812,7 +812,7 @@ getAgentPIDfromSockfile() {
     return 1
 }
 
-useAgent() {
+function useAgent {
     if ssh-add -l &>/dev/null; then # we have keys loaded, we're done
         [ "${SSH_AGENT_PID}" ] || SSH_AGENT_PID=$(getAgentPIDfromSockfile "${SSH_AUTH_SOCK}")
         return 0
@@ -840,7 +840,7 @@ useAgent() {
     fi
 }
 
-startAgent() {
+function startAgent {
     return
     # initialize ssh-agent if no signs of one exist
     local silent=1
@@ -948,7 +948,7 @@ startAgent() {
 }
 
 unalias lsd &>/dev/null
-lsd() {
+function lsd {
     local me=$FUNCNAME dir 
     local hidden="! -name '.*'"
     local maxd=' -maxdepth 1'
@@ -1012,7 +1012,7 @@ function funcs {
 function connect {
     if ! (($#)); then
         printf "usage: ${FUNCNAME} <port_abbrev>  e.g. ${FUNCNAME} USB0\n" >&2
-        printf "usage: ${FUNCNAME} <hostname|IP>:<port> ">&2
+        printf "usage: ${FUNCNAME} <hostname|IP>:<port>\n">&2
         return
     fi
     declare is_tty=0 is_host=0 TTY addr port
@@ -1076,7 +1076,7 @@ function connect {
     if ((is_tty)); then
         printf "${FUNCNAME}: Opening ${TTY}... Ctrl-D to quit\n" >&2
         socat READLINE,noprompt,intr=17,history="${HIST}" \
-            OPEN:${TTY},b115200,cs8,nonblock,rawer
+            OPEN:${TTY},b115200,cs8,nonblock,rawer,lock
     else
         printf "${FUNCNAME}: Opening ${addr}:${port}... Ctrl-D to quit\n" >&2
         socat READLINE,noprompt,intr=17,history="${HIST}" \
