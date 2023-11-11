@@ -31,41 +31,59 @@ def serCmd(cmd, check=True):
     global ser
     global verbose
 
+    esr = -1
+    esri = -1
     responses = [ 0, cmd ]
-    q=cmd.count('?')
-    if q>0:
-        q=cmd.find('?')
-        if q>0:
-            cmd1=cmd[0:q]
-    foundCmd=False
-    foundResp=False
+
+    # chase every command/query with *ESR?
     bcmd=f"{cmd}; *ESR?\n".encode('utf-8')
-    nw = ser.write(bcmd)
-    time.sleep(0.06)
     expected = "*ESR "
+    """
+    # special case responses from PWD and CFG1
     if re.search(r'(?i)[ ]*PWD',cmd) != None:
         expected = "alid Password - System"
     elif re.search(r'(?i)[ ]*CFG[ ]*1',cmd) != None:
         expected = " bytes into NvSRAM"
+    """
 
-    # read back lines until timeout
-    while not foundCmd:
+    # send it
+    nw = ser.write(bcmd)
+    time.sleep(0.06)
+
+    # read lines until we get en echo of our command
+    found = False
+    while not found:
         line = ser.readline()
         line = re.sub('[,]?(\000|\r|\n)*$','',line.decode()).strip()
         resp = line.strip().split(';')
-        for r in resp:
+        for i in range(len(resp)):
+            r = resp[i]
             print(str(r).strip())
             if str(r).strip().find('*ESR?') >= 0:
-                foundCmd=True
-    while not foundResp:
+                found=True
+    # read lines until we see our expected response
+    found = False
+    while not found:
         line = ser.readline()
+        if len(line) == 0:
+            time.sleep(0.06)
+            continue
+        print(f"line: {line}")
         line = re.sub('[,]?(\000|\r|\n)*$','',line.decode()).strip()
         resp = line.strip().split(';')
-        for r in resp:
+        for i in range(len(resp)):
+            r = resp[i]
             print(str(r).strip())
+            if str(r).find('ESR ') >= 0:
+                esr = int(str(r)[4:])
+                esri = i
             if str(r).find(expected) >= 0:
-                foundResp=True
+                found=True
+    if esr>0:
+        responses[0]=esr
     return responses
 
-n = serCmd('MLT 4,4,0; fid?')
+n = serCmd('PWD DRS00015')
+n = serCmd('*idn?')
+n = serCmd('cfg1;#cop2; cfg 0')
 
