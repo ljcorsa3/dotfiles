@@ -39,3 +39,5 @@ git ls-files -z |
     xargs -r0 svn add --parents 2>/dev/null
 svn update
 svn ci -m "${comment}"
+git status
+svn status -vq
