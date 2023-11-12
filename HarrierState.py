@@ -4,6 +4,7 @@ import sys, os, stat, time
 import argparse
 from pathlib import Path
 import json
+import re
 
 filename = None
 port = None
@@ -74,23 +75,34 @@ def main():
         if not ser.isOpen():
             sys.exit(f'{me}: cannot open {ser.name}')
 
-        if verbose: print(f"{me}: sending initial commands to device",file=sys.stderr)
         # make sure we're set for null terminated multiline responses, no acknowledgements,
         # clear status
-        ser.write("MLT 4,4,0; ACK 4,0; *ESR?; DDE?; *CLS\n".encode('utf-8'))
-        ser.readlines() # throw away anything pending
+        try:
+            ser.reset_input_buffer()
+            ser.reset_output_buffer()
+            time.sleep(0.06)
+            if verbose:
+                print(f"{me}: sending initial commands to device",file=sys.stderr)
+            ser.write("MLT 4,4,0; ACK 4,0; *ESR?; DDE?; *CLS\n".encode('utf-8'))
+            time.sleep(0.06)
+            ser.readlines() # throw away anything pending
+        except serial.serialutil.SerialException as e:
+            sys.exit(f"{me}: comms with {ser.name} failed. {e}")
 
         ser.timeout = 0.30
 
         results={}
         success=True
+        # extract
         if args['extract']:
             for cmd in cmds:
-                res = serCmd(cmd)
                 if verbose:
-                    print(res,file=sys.stderr)
+                    print(f"{me}: extracting '{cmd}' response",file=sys.stderr)
+                res = serCmd(cmd)
                 if res[0]==0:
                     results[res[1]]=res[2:]
+                    if verbose:
+                        print(res,file=sys.stderr)
                 else:
                     success=False
             if success:
@@ -100,6 +112,7 @@ def main():
                     print(json.dumps(results, indent = 2),file=sys.stderr)
             else:
                 sys.exit(f"{me}: error extracting command results:\n{results}")
+        #restore
         else:
             try:
                 results = json.load(fd)
@@ -112,10 +125,8 @@ def main():
                 print(f"{me}: sending the following settings:",file=sys.stderr)
                 print(json.dumps(results, indent = 2),file=sys.stderr)
 
-            breakpoint()
             # enter configuration mode
             if verbose: print(f"{me}: sending password",file=sys.stderr)
-            ser.timeout = 2.0
             csn = str(results['#CSN?'][0]).split()[-1]
             res = serCmd(f"PWD DRS{csn}")
 
@@ -124,16 +135,14 @@ def main():
             for cmd in results.keys():
                 if cmd[0] == '#':
                     setting=';'.join(results[cmd])
+                    if verbose:
+                        print(f"{me}: sending '{setting}'",file=sys.stderr)
                     res = serCmd(setting)
                     if verbose:
                         print(res,file=sys.stderr)
-                    #if verbose:
-                    #    print(f"sending: '{''.join(results[cmd])}'",file=sys.stderr)
-                else:
-                    pass#print(f"not sending: {str(results[cmd])}",file=sys.stderr)
             # exit configuration mode
-            ser.timeout = 2.0
             res = serCmd("CFG 0")
+            print(f"YOU MUST POWERCYCLE UNIT FOR SETTINGS TO BECOME EFFECTIVE!",file=sys.stderr)
 
     finally:
         ser.close()
@@ -143,55 +152,79 @@ def main():
 #-------------------------------------------------------------------------------
 #---  functions  ---------------------------------------------------------------
 #-------------------------------------------------------------------------------
-def serCmd(cmd, check=True):
+
+def serCmd(cmd):
     global me
     global ser
     global verbose
 
     responses = [ 0, cmd ]
-    q=cmd.find('?')
-    if q>0: cmd1=cmd[0:q]
-    foundCmd=False
-    foundResp=False
-    bcmd=f"{cmd}\n".encode('utf-8')
+
+    # pyserial doesn't give a definitive way to know when done, so
+    # chase every command/query with a known unique (benign simple quick safe) query
+    # that is not already part of the command
+    for q in [ '*ESR?', '*STB?', '*SRE?', '*ESE?' 'FUA?', 'UTC?' ]:
+        # use first choice not in cmd
+        if cmd.upper().count(q) == 0:
+            xtra_q = q
+            break
+    timeout = 1
+    for slow in [ "#REF", "#COP", "#DFM" ]:
+        if cmd.upper().count(slow) > 0:
+            timeout = 120
+
+    # send command and extra query
+    bcmd=f"{cmd}; {xtra_q}\r".encode('utf-8')
     nw = ser.write(bcmd)
-    time.sleep(0.06)
-    # read back lines until timeout
-    lines = ser.readlines()
-    for i in range(len(lines)):
-        resp = lines[i].decode().strip().split('\0')
-        if str(resp[0]).find(cmd) == 0:
-            foundCmd=True
+
+    # read lines until we get an echo of our added query
+    found = False
+
+    t0 = time.monotonic()
+    while not found and (time.monotonic() - t0) < 1:
+        time.sleep(0.06)
+        line = ser.readline()
+        if len(line) == 0:
             continue
-        if foundCmd and q>0:
-            if str(resp[0]).find(cmd1) == 0:
-                foundResp=True
-                responses += resp
-    if not(foundCmd):
-        breakpoint()
-    if q>0 and not foundResp:
-        breakpoint()
-    # avoid bottomless recursion!
-    if check and not cmd.upper() in [ "*ESR?", "DDE?" ]:
-        resp = serCmd("*ESR?", check=False)
-        resp1 = resp[-1].split(" ")[-1]
-        if resp1.isdecimal():
-            esr=int(resp1)
-        else:
-            breakpoint()
-        responses[0] = esr
-        if esr!=0:
-            if esr & 4:
-                print(f"{me}: command '{cmd}' caused Query error",file=sys.stderr)
-            elif esr & 8:
-                resp = serCmd("DDE?", check=False)
-                resp1 =  resp[-1].split(" ")[-1]
-                dde = int(resp1)
-                print(f"{me}: command '{cmd}' caused Device Dependent Error {dde}",file=sys.stderr)
-            elif esr & 16:
-                print(f"{me}: command '{cmd}' caused Execution error",file=sys.stderr)
-            elif esr & 32:
-                print(f"{me}: command '{cmd}' caused Command error",file=sys.stderr)
+        line = re.sub('[,]?(\000|\r|\n)*$','',line.decode()).strip()
+        resp = line.strip().split(';')
+        for i in range(len(resp)):
+            r = resp[i]
+            if str(r).strip().find(xtra_q) >= 0:
+                found=True
+    if not found:
+        responses[0]= -1
+        return responses
+
+    # read lines until we see our expected response
+    # response will have space instead of '?'
+    xtra_r = re.sub(r'\?',r' ',xtra_q).upper()
+    esr = -1
+    found_xtra = -1
+    found = False
+    t0 = time.monotonic()
+    while not found and (time.monotonic() - t0) < timeout:
+        time.sleep(0.06)
+        line = ser.readline()
+        if len(line) == 0:
+            continue
+        line = re.sub('[,]?(\000|\r|\n)*$','',line.decode()).strip()
+        resp = line.strip().split(';')
+        for i in range(len(resp)):
+            r = resp[i]
+            if str(r).find('ESR ') >= 0:
+                esr = int(str(r)[4:])
+            if str(r).find(xtra_r) >= 0:
+                found_xtra = i
+                found=True
+            if found_xtra < 0:
+                # trim string, clean up nulls, add to return val
+                s = re.sub(r'\000',r'\r\n',str(r).strip())
+                responses.append(s)
+    if not found:
+        responses[0]= -1
+    if esr>0:
+        responses[0]=esr
     return responses
 
 #-------------------------------------------------------------------------------
@@ -218,10 +251,9 @@ def parseArgs():
             help='[PORT] [FILE]')
     args = vars(parser.parse_args())
 
-    print(f"{me}: args = {args}",file=sys.stderr)
     if args['verbose']:
+        print(f"{me}: args = {args}",file=sys.stderr)
         verbose = True
-    breakpoint()
 
     # first try to get file and port from specific argument
     if args['port'] != None:
@@ -232,7 +264,8 @@ def parseArgs():
         if len(args['options'])>0:
             parser.print_usage()
             sys.exit(f"{me}: Don't need optional arguments")
-    else: # check options to detect file and port existence/type
+    else:
+        # check options to detect file and port existence/type
         for f in args['options']:
             if filename == None and f == '-':
                 filename = '-'
@@ -272,7 +305,8 @@ def openFile(filename):
     global args
 
     fd = None
-    if filename == None or filename == '-': # no file, check to see if stdio still terminal (if so, fail)
+    if filename == None or filename == '-':
+        # no file, check to see if stdio still terminal (if so, fail)
         stdio = True
         if args['restore']:
             if not os.isatty(0):
@@ -283,11 +317,11 @@ def openFile(filename):
                 print(f"{me}: cannot read from terminal")
                 exit(1)
         else:
-            if not os.isatty(1):
-                fd = sys.stdout
-                if verbose:
-                    print(f"{me}: writing to stdout",file=sys.stderr)
-    else: # file arg.  if reading, must exist
+            fd = sys.stdout
+            if verbose:
+                print(f"{me}: writing to stdout",file=sys.stderr)
+    else:
+        # file arg.  if reading, must exist
         stdio = False
         if args['restore']: # see if we have a real file arg required for read
             try:
@@ -299,13 +333,20 @@ def openFile(filename):
             except FileNotFoundError:
                 parser.print_usage()
                 sys.exit(f"{me}: file {filename} cannot be found")
-            fd = open(filename,"r")
+            try:
+                fd = open(filename,"r")
+            except:
+                sys.exit(f"{me}: cannot open file {filename} for reading")
         else:
-            fd = open(filename,"w")
+            try:
+                fd = open(filename,"w")
+            except:
+                sys.exit(f"{me}: cannot open file {filename} for writing")
     return [ fd, stdio ]
 
 #-------------------------------------------------------------------------------
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
+    sys.exit(0)
 
 # vim: nu
