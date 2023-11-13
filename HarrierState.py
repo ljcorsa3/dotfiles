@@ -39,6 +39,14 @@ cmds = [
     "#VUI?",
     "#WPM?",
 ]
+required = [
+    "#CDT?",
+    "#COP?",
+    "#CSN?",
+    "#MAC 3?",
+    "#MDL?",
+    "#WPM?",
+]
 
 #-------------------------------------------------------------------------------
 def main():
@@ -60,7 +68,7 @@ def main():
     ser = serial.Serial(port)
     ser.baudrate = 115200
     ser.timeout = 0.5
-    fd, stdio = openFile(filename)
+    fd = openFile(filename)
 
     try:
         if verbose: print(f"{me}: opening serial port {port}",file=sys.stderr)
@@ -93,8 +101,12 @@ def main():
 
         results={}
         success=True
+
         # extract
         if args['extract']:
+            # query each command in list
+            # add new dictionary entry with command as key, response as data
+            # write dictionary to file as JSON 
             for cmd in cmds:
                 if verbose:
                     print(f"{me}: extracting '{cmd}' response",file=sys.stderr)
@@ -106,33 +118,55 @@ def main():
                 else:
                     success=False
             if success:
+                if verbose:
+                    print(f"{me}: writing settings to {fd.name} as JSON",file=sys.stderr)
                 json.dump(results, fd)
                 if verbose:
                     print(f"{me}: extracted the following settings:",file=sys.stderr)
                     print(json.dumps(results, indent = 2),file=sys.stderr)
             else:
                 sys.exit(f"{me}: error extracting command results:\n{results}")
-        #restore
-        else:
+
+        # restore or reset
+        if args['restore'] or args['reset']:
+            # read dictionary from existing JSON file
+            # unlock unit with password (serial number)
+            # place unit into CFG mode 
+            # optionally wipe NVRAM
+            # 
+            # send command (dictionary data) to 
+
             try:
                 results = json.load(fd)
             except json.decoder.JSONDecodeError:
-                if stdio:
-                    sys.exit(f"{me}: cannot parse input")
-                else:
-                    sys.exit(f"{me}: cannot parse input file '{filename}'")
+                sys.exit(f"{me}: cannot parse input {fd.name}")
             if verbose:
                 print(f"{me}: sending the following settings:",file=sys.stderr)
                 print(json.dumps(results, indent = 2),file=sys.stderr)
 
-            # enter configuration mode
-            if verbose: print(f"{me}: sending password",file=sys.stderr)
+            # send password 
+            if verbose:
+                print(f"{me}: sending password",file=sys.stderr)
             csn = str(results['#CSN?'][0]).split()[-1]
             res = serCmd(f"PWD DRS{csn}")
+            if res[0] != 0:
+                sys.exit(f"{me}: attempt to use '{res[1]}' failed\n")
 
-            if verbose: print(f"{me}: entering CFG mode",file=sys.stderr)
+            # enter configuration mode
+            if verbose:
+                print(f"{me}: entering CFG mode",file=sys.stderr)
             res = serCmd("CFG 1")
+
+            if args['reset']:
+                if verbose:
+                    print(f"{me}: clearing NVRAM",file=sys.stderr)
+                res = serCmd("#EED 1")
+
+            # restore previous settings
             for cmd in results.keys():
+                # if resetting, only send required settings
+                if args['reset'] and cmd not in required:
+                    continue
                 if cmd[0] == '#':
                     setting=';'.join(results[cmd])
                     if verbose:
@@ -146,8 +180,7 @@ def main():
 
     finally:
         ser.close()
-        if not stdio:
-            fd.close()
+        fd.close()
 
 #-------------------------------------------------------------------------------
 #---  functions  ---------------------------------------------------------------
@@ -238,9 +271,11 @@ def parseArgs():
     parser = argparse.ArgumentParser(description='extract or restore Harrier default settings')
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--extract','-r', action='store_true', \
-            help='extract default settings from harrier at serial port')
+            help='extract settings from harrier at serial port')
     group.add_argument('--restore','-w', action='store_true', \
-            help='restore default settings to harrier at serial port')
+            help='restore settings to harrier at serial port')
+    group.add_argument('--reset', action='store_true', \
+            help='wipe NVRAM and restore default settings to harrier at serial port')
     parser.add_argument('--port',"-p", action = 'store', required=False,\
             help='full path to serial port device')
     parser.add_argument('--file','-f', action = 'store', required=False, \
@@ -285,6 +320,8 @@ def parseArgs():
         args['options'].remove(filename)
 
     # port has to exist, file does not, so use missing file anyway
+            res = serCmd("#EED 1")
+            res = serCmd("CFG 0")
     if port != None and filename == None and args['extract']:
         for f in args['options']:
             if f != port:
@@ -307,22 +344,20 @@ def openFile(filename):
     fd = None
     if filename == None or filename == '-':
         # no file, check to see if stdio still terminal (if so, fail)
-        stdio = True
         if args['restore']:
             if not os.isatty(0):
                 fd = sys.stdin
                 if verbose:
-                    print(f"{me}: reading from stdin",file=sys.stderr)
+                    print(f"{me}: reading from {fd.name}",file=sys.stderr)
             else:
                 print(f"{me}: cannot read from terminal")
                 exit(1)
         else:
             fd = sys.stdout
             if verbose:
-                print(f"{me}: writing to stdout",file=sys.stderr)
+                print(f"{me}: writing to {fd.name}",file=sys.stderr)
     else:
         # file arg.  if reading, must exist
-        stdio = False
         if args['restore']: # see if we have a real file arg required for read
             try:
                 mode = os.stat(filename).st_mode
@@ -342,7 +377,7 @@ def openFile(filename):
                 fd = open(filename,"w")
             except:
                 sys.exit(f"{me}: cannot open file {filename} for writing")
-    return [ fd, stdio ]
+    return fd
 
 #-------------------------------------------------------------------------------
 if __name__ == "__main__":
