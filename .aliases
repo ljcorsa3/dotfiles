@@ -61,6 +61,7 @@ alias kk='ll'
 alias untic=infocmp
 #alias cdh='awk \'! seen[$0]++\' "${HOME}/.dirslist" | less +G'
 alias ..='cd ..'
+alias cd..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'
 alias path='echo -e ${PATH//:/\\n}'

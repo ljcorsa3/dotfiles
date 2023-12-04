@@ -196,11 +196,16 @@ def serCmd(cmd):
     # pyserial doesn't give a definitive way to know when done, so
     # chase every command/query with a known unique (benign simple quick safe) query
     # that is not already part of the command
-    for q in [ '*ESR?', '*STB?', '*SRE?', '*ESE?' 'FUA?', 'UTC?' ]:
+    xtra_q = None
+    xtras = [ '*ESR?', '*STB?', '*SRE?', '*ESE?', 'FUA?', 'UTC?' ]
+    for q in xtras:
         # use first choice not in cmd
         if cmd.upper().count(q) == 0:
             xtra_q = q
             break
+    if xtra_q == None:
+        sys.exit(f"{me}: command contains all of {', '.join(xtras)}"
+
     timeout = 1
     for slow in [ "#REF", "#COP", "#DFM" ]:
         if cmd.upper().count(slow) > 0:

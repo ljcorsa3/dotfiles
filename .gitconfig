@@ -15,17 +15,18 @@
     root = rev-parse --show-toplevel
     s = status -s
     st = status 
-    addm = "!f() { git status --porcelain |\
+    addm = "! f() { git status --porcelain |\
         awk '$1 ~ /A|M/ {$1=\"\"; $0=$0; $1=$1; printf \"%s\\x0\", $0}' |\
         xargs -r0 git add -fv; }; f"
-    ls = "!f() { git ls-files -z |\
+    ls = "! f() { git ls-files -z |\
         xargs -r0 ls -ad -1 -Fh --color=auto; }; f"
-    ll = "!f() { git ls-files -z |\
+    ll = "! f() { git ls-files -z |\
         xargs -r0 ls -lad -Fh --color=auto; }; f"
     log1 = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
-	alias   = config --get-regexp '^alias\\.'
+	alias = "! git config --get-regexp \"^alias\\.$1\" #"
 	aliases = config --get-regexp '^alias\\.'
-    last = "!f() { for i in $(git ls-files); do \
+    last = "! git log -p -${1:-1} #"
+    when = "! f() { for i in $(git ls-files); do \
         x=$(git --no-pager log -1 --pretty=format:"%cr" "$i"); \
         printf \"%-25.25s %s\\x0a\" \"$i\" \"$x\"; \
         done; }; f"

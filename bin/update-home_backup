@@ -4,7 +4,7 @@ me=$(readlink -e "$0")
 me=$(basename "${me}")
 cwd="${PWD}"
 backupdir="${HOME}/.home_backup"
-comment="auto" #"${me} @ $(date)"
+comment="${@:-autobackup $(date)}"
 
 command cd "${HOME}"
 

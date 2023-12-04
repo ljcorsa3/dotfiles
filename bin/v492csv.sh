@@ -4,7 +4,7 @@ me=$(basename "$0")
 mydir=$(dirname "${me}")
 me=$(basename "${me}")
 
-die() { printf "${me}: %s -- exiting.\n" >&2 ; ${leave} 1; } 
+die() { printf "${me}: %s -- exiting.\n" "$@" >&2 ; ${leave} 1; } 
 
 usage() {
     cat >&2 <<_eof_
@@ -29,21 +29,21 @@ for v49file in *.v49; do
     printf "${me}: Processing ${v49file}...\n"
     (
     ~ljcorsa/cpp/bin/v492csv "$v49file" \
-        1> >(grep "${stream}" > "${v49file}.out.csv") \
-        2> >(grep "${stream}" > "${v49file}.hdr.csv") &
+        1> >(grep -i "${stream}" > "${v49file%%\.v49}.data.csv") \
+        2> >(grep -i "${stream}" > "${v49file%%\.v49}.hdr.csv") &
     ) &>/dev/null
 done
 ((n)) || die "No .v49 files found in ${PWD}"
 
 printf "${me}: waiting...\n"
 sleep 1
-watch -n 1 -p wc -l ????????.v49.hdr.csv & disown
+watch -n 1 -p wc -l ????????.hdr.csv & disown
 watch_pid=$!
 wait
 kill $watch_pid
-ls -l ????????.v49*
+ls -l ????????.csv
 #    | xargs awk 'FNR >= 3 && FNR <= 5'\
-command ls *.v49.hdr.csv \
+command ls *.hdr.csv \
     | grep -v _100 \
     | xargs head -3 \
     | tee "firstlines-$(basename "${PWD}").txt"

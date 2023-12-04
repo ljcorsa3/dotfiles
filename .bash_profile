@@ -70,15 +70,6 @@ fi
 TMOUT=0
 unset USERNAME MAILCHECK
 
-# # initialize ssh-agent if no signs exist
-# if [ -z "${SSH_AUTH_SOCK}" -a -r "~/.ssh/id_rsa" ]; then
-#     eval $(ssh-agent -s)
-# fi
-# if [ "${SSH_AUTH_SOCK}" ]; then
-#     ssh-add -l | grep -q "${USER}" || \
-#     ssh-add  <&-
-# fi
-
 if [[ "${USER,,}" =~ (ren|ljcorsa) ]]; then
     umask 0
     TZ=EST5EDT
@@ -126,7 +117,7 @@ command ls $LS_OPTIONS >/dev/null 2>&1  || LS_OPTIONS="-F --color=auto"
 FCEDIT=vi; EDITOR=vi; VISUAL=vi
 type -p vim >/dev/null 2>&1 && { EDITOR=vim; VISUAL=vim; }
 
-# set less as pager if availabel
+# set less as pager if available
 PAGER=more
 if type -p less >/dev/null 2>&1 ; then
     PAGER=less
@@ -185,7 +176,9 @@ if [[ $(readlink -f "${BASH_SOURCE[0]}") == "${HOME}/.bash_profile" ]]; then
         source "${HOME}/.bashrc"
     fi
 fi
-typeset -F useAgent &>/dev/null && useAgent
+
+# get connected to an ssh agent
+typeset -F startAgent &>/dev/null && startAgent
 
 #get nickname for HOST
 typeset -F getNickname &>/dev/null && HOST=$(getNickname)
@@ -295,20 +288,6 @@ fi
 # remove duplicates in PATH
 PATH=$( printf '%s' "${PATH}" | 
     awk -v RS=':' '!($0 in a){a[$0];printf("%s%s",length(a)>1?":":"",$0)}' )
-
-# maybe connect ssh-agent to WSL someday
-if ((0)); then
-    if [ "${WSL2}" == "1" ] && type -p wsl2-ssh-pageant &>/dev/null; then
-        export SSH_AUTH_SOCK="$HOME/.ssh/agent.sock"
-        rm -f ${SSH_AUTH_SOCK}
-        (
-            setsid nohup socat UNIX-LISTEN:"$SSH_AUTH_SOCK,fork" EXEC:wsl2-ssh-pageant &>/dev/null &
-            disown
-        )
-    elif typeset -F startAgent &>/dev/null; then
-        startAgent -s
-    fi
-fi
 
 # stop exporting vars
 set +a

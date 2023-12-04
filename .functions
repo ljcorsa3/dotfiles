@@ -812,35 +812,75 @@ function getAgentPIDfromSockfile {
     return 1
 }
 
-function useAgent {
-    if ssh-add -l &>/dev/null; then # we have keys loaded, we're done
-        [ "${SSH_AGENT_PID}" ] || SSH_AGENT_PID=$(getAgentPIDfromSockfile "${SSH_AUTH_SOCK}")
+# check for lsof when loading function
+type -p lsof &>/dev/null || echo "ERROR: lsof is not available!!"
+function getAgentPID {
+	local FILE="$1" PID
+	if PID=$(lsof  -Fp -u "${LOGNAME}" -a "${FILE}" 2>/dev/null |
+		awk '$1 ~ /^p/ {print substr($1,2)}'); then
+		printf '%s\n' "${PID}"
+	fi
+}
+
+function startAgent {
+    local SOCK SOCKS=() PID
+	export SSH_AUTH_SOCK SSH_AGENT_PID
+    if [ "${SSH_AUTH_SOCK}" ] && ssh-add -l &>/dev/null; then 
+		# we have keys loaded, we're done
+        [ "${SSH_AGENT_PID}" ] || SSH_AGENT_PID=$(getAgentPID "${SSH_AUTH_SOCK}")
         return 0
     fi
     # try all the sockets we can think of
-    local SOCK SOCKS=()
     mapfile -t SOCKS < <( find /tmp -type s -user ${LOGNAME} -regextype posix-extended \
         \( -regex "/tmp/ssh-.*/agent\.[[:digit:]]+" \) \
         -o \( -regex "/tmp/keyring-.*/socket.ssh" \) 2>/dev/null )
     # prepend gnome keyring 
     [ -S /run/user/$(id -u)/keyring/ssh ] && SOCKS=( "/run/user/$(id -u)/keyring/ssh" "${SOCKS[@]}" )
+    # prepend WSL pageant process 
+    [ -S "${HOME}/.ssh/agent.sock" ] && SOCKS=( "${HOME}/.ssh/agent.sock" "${SOCKS[@]}" )
     for SOCK in "${SOCKS[@]}" ; do
-        # test if this socket is supported by an agent
-        if env SSH_AUTH_SOCK="${SOCK}" ssh-add -l &>/dev/null; then
-            export SSH_AUTH_SOCK="${SOCK}"
-            [ "${SSH_AGENT_PID}" ] || SSH_AGENT_PID=$(getAgentPIDfromSockfile "${SSH_AUTH_SOCK}")
-            return 0
-        fi
+		if SSH_AGENT_PID=$(getAgentPID "${SOCK}"); then
+			SSH_AUTH_SOCK="${SOCK}"
+			if ssh-add -l &>/dev/null; then
+				return 0
+			fi
+		fi
     done
-    # no existing agent.  populate the one we started with
+    # no existing agent.
+    # try connecting WSL to Pageant process on Windows
+	if ((WSL2)) && type -p wsl2-ssh-pageant.exe &>/dev/null; then
+		SSH_AUTH_SOCK="$HOME/.ssh/agent.sock"
+		rm -f ${SSH_AUTH_SOCK}
+		SSH_AGENT_PID=$(
+			nohup socat UNIX-LISTEN:"$SSH_AUTH_SOCK,fork" EXEC:wsl2-ssh-pageant.exe &>/dev/null &
+			disown
+			echo $!
+		)
+	fi
+    # try starting normal ssh-agent
+    if ! ((SSH_AGENT_PID)); then
+        eval $(ssh-agent -s)
+        SSH_AGENT_PID=$(getAgentPID "${SSH_AUTH_SOCK}")
+        # give up in failure
+        if ! ((SSH_AGENT_PID)); then
+            printf "${FUNCNAME}: could not start an agent!"
+            return 1
+        fi
+	fi
+	if ssh-add -l &>/dev/null; then
+		return 0
+	fi
+	# have agent, now add keys
+    mapfile -t KEYS < <(file -N -F '|' ${HOME}/.ssh/* 2>/dev/null |
+		awk -F $'|' '/private key/ {print $1}')
     if [ -n "${DISPLAY}" -a -n "${SSH_ASKPASS}" ]; then
-        ssh-add ~/.ssh/id_* <&-
+        ssh-add "${KEYS[@]}" <&-
     else
-        ssh-add ~/.ssh/id_* 
+        ssh-add "${KEYS[@]}"
     fi
 }
 
-function startAgent {
+function startAgentOLD {
     return
     # initialize ssh-agent if no signs of one exist
     local silent=1
@@ -978,14 +1018,14 @@ function lsd {
 unalias vars &>/dev/null
 function vars {
     if (($#)); then
-        awk -v PAT="$@" 'BEGIN{for(i in ENVIRON){if(match(i,"BASH_FUNC_")==0 && match(i,PAT)!=0){
-        s=ENVIRON[i]
-        gsub(/[^[:print:]]/,"",s)
-        #if(length(s)>50){print(i "=" substr(s,1,50) "...")} else 
-        print(i "=" s)
+        awk -v PAT="$@" 'BEGIN{IGNORECASE=1; for(i in ENVIRON){if(match(i,"BASH_FUNC_")==0 && match(i,PAT)!=0){
+            s=ENVIRON[i]
+            gsub(/[^[:print:]]/,"",s)
+            #if(length(s)>50){print(i "=" substr(s,1,50) "...")} else 
+            print(i "=" s)
         }}}' | LANG=C LC_ALL=C LC_COLLATE=C sort
     else
-        awk 'BEGIN{for(i in ENVIRON){if(match(i,"BASH_FUNC_")==0){
+        awk 'BEGIN{IGNORECASE=1;for(i in ENVIRON){if(match(i,"BASH_FUNC_")==0){
             s=ENVIRON[i]
             gsub(/[^[:print:]]/,"",s)
             #if(length(s)>50){print(i "=" substr(s,1,50) "...")} else {print(i "=" s)}
@@ -1061,10 +1101,9 @@ function connect {
         return
     fi
     # clean up tmpfile, tty settings on exit
-    declare TMP_FILE=$(mktemp)
-    declare TRAPS='trap - RETURN; rm -f ${TMP_FILE}; stty '
-    TRAPS+=$(stty --save < /dev/tty)
-    TRAPS+=' < /dev/tty'
+    declare TMP_FILE=$(mktemp) STTY=$(stty --save < /dev/tty)
+    declare TRAPS='trap - 0 1 2 3 15 RETURN; rm -f ${TMP_FILE}; '
+    TRAPS+='stty ${STTY} < /dev/tty; '
     trap "${TRAPS}" 0 1 2 3 15 RETURN
     # set up history
     declare HIST="${HOME}/.hist_${addr}${port:+:}${port}"
