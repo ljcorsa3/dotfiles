@@ -178,7 +178,7 @@ if [[ $(readlink -f "${BASH_SOURCE[0]}") == "${HOME}/.bash_profile" ]]; then
 fi
 
 # get connected to an ssh agent
-typeset -F startAgent &>/dev/null && startAgent
+#typeset -F startAgent &>/dev/null && startAgent
 
 #get nickname for HOST
 typeset -F getNickname &>/dev/null && HOST=$(getNickname)
