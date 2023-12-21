@@ -825,7 +825,7 @@ function getAgentPID {
 function startAgent {
     local SOCK SOCKS=() PID
 	export SSH_AUTH_SOCK SSH_AGENT_PID
-    if [ "${SSH_AUTH_SOCK}" ] && ssh-add -l &>/dev/null; then 
+    if [ "${SSH_AUTH_SOCK}" ] && timeout 1 ssh-add -l &>/dev/null; then 
 		# we have keys loaded, we're done
         [ "${SSH_AGENT_PID}" ] || SSH_AGENT_PID=$(getAgentPID "${SSH_AUTH_SOCK}")
         return 0
@@ -841,7 +841,7 @@ function startAgent {
     for SOCK in "${SOCKS[@]}" ; do
 		if SSH_AGENT_PID=$(getAgentPID "${SOCK}"); then
 			SSH_AUTH_SOCK="${SOCK}"
-			if ssh-add -l &>/dev/null; then
+			if timeout 1 ssh-add -l &>/dev/null; then
 				return 0
 			fi
 		fi
@@ -860,22 +860,25 @@ function startAgent {
     # try starting normal ssh-agent
     if ! ((SSH_AGENT_PID)); then
         eval $(ssh-agent -s)
+        sleep 0.3
         SSH_AGENT_PID=$(getAgentPID "${SSH_AUTH_SOCK}")
-        # give up in failure
         if ! ((SSH_AGENT_PID)); then
             printf "${FUNCNAME}: could not start an agent!"
             return 1
         fi
 	fi
-	if ssh-add -l &>/dev/null; then
+    # have an agent, now see if I have keys
+	if timeout 1 ssh-add -l &>/dev/null; then
 		return 0
 	fi
-	# have agent, now add keys
-    mapfile -t KEYS < <(file -N -F '|' ${HOME}/.ssh/* 2>/dev/null |
+    # add actual keys in ~/.ssh to agent (tested using "file" command)
+    mapfile -t KEYS < <( file -N -F '|' ${HOME}/.ssh/* 2>/dev/null |
 		awk -F $'|' '/private key/ {print $1}')
     if [ -n "${DISPLAY}" -a -n "${SSH_ASKPASS}" ]; then
+        # force askpass to use X window
         ssh-add "${KEYS[@]}" <&-
     else
+        # let askpass use terminal
         ssh-add "${KEYS[@]}"
     fi
 }
@@ -1161,4 +1164,8 @@ function chr {
 }
 function ord {
   LC_CTYPE=C printf '%d' "'$1"
+}
+function hosts {
+    awk '$1 =="Host" && $2 != "*" {print $2}' ~/.ssh/config |
+    xargs -n 1 sshlookup -a
 }
