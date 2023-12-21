@@ -191,33 +191,36 @@ def serCmd(cmd):
     global ser
     global verbose
 
+    # set default response list
+    # first value is ESR value.  -1 if no ESR found
     responses = [ 0, cmd ]
 
     # pyserial doesn't give a definitive way to know when done, so
     # chase every command/query with a known unique (benign simple quick safe) query
     # that is not already part of the command
-    xtra_q = None
-    xtras = [ '*ESR?', '*STB?', '*SRE?', '*ESE?', 'FUA?', 'UTC?' ]
-    for q in xtras:
+    added_query = None
+    added_query_list = [ '*ESR?', '*STB?', '*SRE?', '*ESE?', 'FUA?', 'UTC?' ]
+    for q in added_query_list:
         # use first choice not in cmd
         if cmd.upper().count(q) == 0:
-            xtra_q = q
+            added_query = q
             break
-    if xtra_q == None:
-        sys.exit(f"{me}: command contains all of {', '.join(xtras)}"
+    if added_query == None:
+        sys.exit(f"{me}: command contains all of {', '.join(added_query_list)}"
 
+    # send command and extra query
+    binary_cmd=f"{cmd}; {added_query}\r".encode('utf-8')
+    nw = ser.write(binary_cmd)
+
+    # set a longer timeout for certain commands to complete
     timeout = 1
     for slow in [ "#REF", "#COP", "#DFM" ]:
         if cmd.upper().count(slow) > 0:
             timeout = 120
 
-    # send command and extra query
-    bcmd=f"{cmd}; {xtra_q}\r".encode('utf-8')
-    nw = ser.write(bcmd)
-
-    # read lines until we get an echo of our added query
+    # read lines until we get an echo of our command string
+    # (including the additional query string)
     found = False
-
     t0 = time.monotonic()
     while not found and (time.monotonic() - t0) < 1:
         time.sleep(0.06)
@@ -228,17 +231,18 @@ def serCmd(cmd):
         resp = line.strip().split(';')
         for i in range(len(resp)):
             r = resp[i]
-            if str(r).strip().find(xtra_q) >= 0:
+            if str(r).strip().find(added_query) >= 0:
                 found=True
     if not found:
         responses[0]= -1
         return responses
 
-    # read lines until we see our expected response
     # response will have space instead of '?'
-    xtra_r = re.sub(r'\?',r' ',xtra_q).upper()
+    added_query_response = re.sub(r'\?',r' ',added_query).upper()
+    # read lines until we see our expected response
+    # ESR response is guaranteed to be present, so capture that especially
     esr = -1
-    found_xtra = -1
+    added_response_found = -1
     found = False
     t0 = time.monotonic()
     while not found and (time.monotonic() - t0) < timeout:
@@ -247,22 +251,23 @@ def serCmd(cmd):
         if len(line) == 0:
             continue
         line = re.sub('[,]?(\000|\r|\n)*$','',line.decode()).strip()
-        resp = line.strip().split(';')
-        for i in range(len(resp)):
-            r = resp[i]
-            if str(r).find('ESR ') >= 0:
-                esr = int(str(r)[4:])
-            if str(r).find(xtra_r) >= 0:
-                found_xtra = i
+        # split response into semicolon separated stanzas
+        stanzas = line.strip().split(';')
+        for i in range(len(stanzas)):
+            resp = stanzas[i]
+            if str(resp).find('ESR ') >= 0:
+                esr = int(str(resp)[4:])
+            if str(resp).find(added_query_response) >= 0:
+                added_response_found = i
                 found=True
-            if found_xtra < 0:
+            if added_response_found < 0:
                 # trim string, clean up nulls, add to return val
-                s = re.sub(r'\000',r'\r\n',str(r).strip())
+                s = re.sub(r'\000',r'\r\n',str(resp).strip())
                 responses.append(s)
     if not found:
-        responses[0]= -1
-    if esr>0:
-        responses[0]=esr
+        responses[0] = -1
+    if esr > 0:
+        responses[0] = esr
     return responses
 
 #-------------------------------------------------------------------------------
@@ -325,8 +330,8 @@ def parseArgs():
         args['options'].remove(filename)
 
     # port has to exist, file does not, so use missing file anyway
-            res = serCmd("#EED 1")
-            res = serCmd("CFG 0")
+    #res = serCmd("#EED 1")
+    #res = serCmd("CFG 0")
     if port != None and filename == None and args['extract']:
         for f in args['options']:
             if f != port:
