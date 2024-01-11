@@ -65,118 +65,90 @@ def main():
 
     parseArgs()
 
-    ser = serial.Serial(port)
-    ser.baudrate = 115200
-    ser.timeout = 0.5
+    ser = openSerial(port)
     fd = openFile(filename)
 
-    try:
-        if verbose: print(f"{me}: opening serial port {port}",file=sys.stderr)
-        try:
-            ser.open()
-        except serial.SerialException:
-            ser.close()
-        try:
-            ser.open()
-        except serial.SerialException:
-                sys.exit(f'{me}: cannot open {ser.name}')
-        if not ser.isOpen():
-            sys.exit(f'{me}: cannot open {ser.name}')
+    ser.timeout = 0.30
 
-        # make sure we're set for null terminated multiline responses, no acknowledgements,
-        # clear status
-        try:
-            ser.reset_input_buffer()
-            ser.reset_output_buffer()
-            time.sleep(0.06)
+    dev_settings={}
+    success=True
+
+    # extract
+    if args['extract']:
+        # query each command in list
+        # add new dictionary entry with command as key, response as data
+        # write dictionary to file as JSON 
+        for cmd in cmds:
             if verbose:
-                print(f"{me}: sending initial commands to device",file=sys.stderr)
-            ser.write("MLT 4,4,0; ACK 4,0; *ESR?; DDE?; *CLS\n".encode('utf-8'))
-            time.sleep(0.06)
-            ser.readlines() # throw away anything pending
-        except serial.serialutil.SerialException as e:
-            sys.exit(f"{me}: comms with {ser.name} failed. {e}")
-
-        ser.timeout = 0.30
-
-        results={}
-        success=True
-
-        # extract
-        if args['extract']:
-            # query each command in list
-            # add new dictionary entry with command as key, response as data
-            # write dictionary to file as JSON 
-            for cmd in cmds:
+                print(f"{me}: extracting '{cmd}' response",file=sys.stderr)
+            res = serCmd(cmd)
+            if res[0]==0:
+                dev_settings[res[1]]=res[2:]
                 if verbose:
-                    print(f"{me}: extracting '{cmd}' response",file=sys.stderr)
-                res = serCmd(cmd)
-                if res[0]==0:
-                    results[res[1]]=res[2:]
-                    if verbose:
-                        print(res,file=sys.stderr)
-                else:
-                    success=False
-            if success:
-                if verbose:
-                    print(f"{me}: writing settings to {fd.name} as JSON",file=sys.stderr)
-                json.dump(results, fd)
-                if verbose:
-                    print(f"{me}: extracted the following settings:",file=sys.stderr)
-                    print(json.dumps(results, indent = 2),file=sys.stderr)
+                    print(res,file=sys.stderr)
             else:
-                sys.exit(f"{me}: error extracting command results:\n{results}")
-
-        # restore or reset
-        if args['restore'] or args['reset']:
-            # read dictionary from existing JSON file
-            # unlock unit with password (serial number)
-            # place unit into CFG mode 
-            # optionally wipe NVRAM
-            # 
-            # send command (dictionary data) to 
-
-            try:
-                results = json.load(fd)
-            except json.decoder.JSONDecodeError:
-                sys.exit(f"{me}: cannot parse input {fd.name}")
+                success=False
+        if success:
             if verbose:
-                print(f"{me}: sending the following settings:",file=sys.stderr)
-                print(json.dumps(results, indent = 2),file=sys.stderr)
-
-            # send password 
+                print(f"{me}: writing settings to {fd.name} as JSON",file=sys.stderr)
+            json.dump(dev_settings, fd)
             if verbose:
-                print(f"{me}: sending password",file=sys.stderr)
-            csn = str(results['#CSN?'][0]).split()[-1]
-            res = serCmd(f"PWD DRS{csn}")
-            if res[0] != 0:
-                sys.exit(f"{me}: attempt to use '{res[1]}' failed\n")
+                print(f"{me}: extracted the following settings:",file=sys.stderr)
+                print(json.dumps(dev_settings, indent = 2),file=sys.stderr)
+        else:
+            sys.exit(f"{me}: error extracting command dev_settings:\n{dev_settings}")
 
-            # enter configuration mode
+    # restore or reset
+    if args['restore'] or args['reset']:
+        # read dictionary from existing JSON file
+        # unlock unit with password (serial number)
+        # place unit into CFG mode 
+        # optionally wipe NVRAM
+        # 
+        # send command (dictionary data) to 
+
+        try:
+            dev_settings = json.load(fd)
+        except json.decoder.JSONDecodeError:
+            sys.exit(f"{me}: cannot parse input {fd.name}")
+        if verbose:
+            print(f"{me}: sending the following settings:",file=sys.stderr)
+            print(json.dumps(dev_settings, indent = 2),file=sys.stderr)
+
+        # send password 
+        if verbose:
+            print(f"{me}: sending password",file=sys.stderr)
+        csn = str(dev_settings['#CSN?'][0]).split()[-1]
+        res = serCmd(f"PWD DRS{csn}")
+        if res[0] != 0:
+            sys.exit(f"{me}: attempt to use '{res[1]}' failed\n")
+
+        # enter configuration mode
+        if verbose:
+            print(f"{me}: entering CFG mode",file=sys.stderr)
+        res = serCmd("CFG 1")
+
+        if args['reset']:
             if verbose:
-                print(f"{me}: entering CFG mode",file=sys.stderr)
-            res = serCmd("CFG 1")
+                print(f"{me}: clearing NVRAM",file=sys.stderr)
+            res = serCmd("#EED 1")
 
-            if args['reset']:
+        # restore previous settings
+        for cmd in dev_settings.keys():
+            # if resetting, only send required settings
+            if args['reset'] and cmd not in required:
+                continue
+            # if restoring, send everything
+            if cmd[0] == '#':
+                setting=';'.join(dev_settings[cmd])
                 if verbose:
-                    print(f"{me}: clearing NVRAM",file=sys.stderr)
-                res = serCmd("#EED 1")
-
-            # restore previous settings
-            for cmd in results.keys():
-                # if resetting, only send required settings
-                if args['reset'] and cmd not in required:
-                    continue
-                if cmd[0] == '#':
-                    setting=';'.join(results[cmd])
-                    if verbose:
-                        print(f"{me}: sending '{setting}'",file=sys.stderr)
-                    res = serCmd(setting)
-                    if verbose:
-                        print(res,file=sys.stderr)
-            # exit configuration mode
-            res = serCmd("CFG 0")
-            print(f"YOU MUST POWERCYCLE UNIT FOR SETTINGS TO BECOME EFFECTIVE!",file=sys.stderr)
+                    print(f"{me}: sending '{setting}'",file=sys.stderr)
+                res = serCmd(setting)
+                if verbose:
+                    print(res,file=sys.stderr)
+        # exit configuration mode
+        res = serCmd("CFG 0")
+        print(f"YOU MUST POWERCYCLE UNIT FOR SETTINGS TO BECOME EFFECTIVE!",file=sys.stderr)
 
     finally:
         ser.close()
@@ -185,6 +157,40 @@ def main():
 #-------------------------------------------------------------------------------
 #---  functions  ---------------------------------------------------------------
 #-------------------------------------------------------------------------------
+
+def openSerial(port):
+    global ser
+    ser = serial.Serial(port)
+    ser.baudrate = 115200
+    ser.timeout = 0.5
+
+    if verbose:
+        print(f"{me}: opening serial port {port}",file=sys.stderr)
+    try:
+        ser.open()
+    except serial.SerialException:
+        ser.close()
+    try:
+        ser.open()
+    except serial.SerialException:
+            sys.exit(f'{me}: cannot open {ser.name}')
+    if not ser.isOpen():
+        sys.exit(f'{me}: cannot open {ser.name}')
+
+    # make sure we're set for null terminated multiline responses, no acknowledgements,
+    # clear status
+    try:
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+        time.sleep(0.06)
+        if verbose:
+            print(f"{me}: sending initial commands to device",file=sys.stderr)
+        ser.write("MLT 4,4,0; ACK 4,0; *ESR?; DDE?; *CLS\n".encode('utf-8'))
+        time.sleep(0.06)
+        ser.readlines() # throw away anything pending
+    except serial.serialutil.SerialException as e:
+        sys.exit(f"{me}: comms with {ser.name} failed. {e}")
+    return
 
 def serCmd(cmd):
     global me
