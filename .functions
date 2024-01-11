@@ -1118,7 +1118,7 @@ function connect {
     if ((is_tty)); then
         printf "${FUNCNAME}: Opening ${TTY}... Ctrl-D to quit\n" >&2
         socat READLINE,noprompt,intr=17,history="${HIST}" \
-            OPEN:${TTY},b115200,cs8,nonblock,rawer,lock
+            GOPEN:${TTY},b115200,cs8,nonblock,rawer,lock,crnl,icanon=1
     else
         printf "${FUNCNAME}: Opening ${addr}:${port}... Ctrl-D to quit\n" >&2
         socat READLINE,noprompt,intr=17,history="${HIST}" \
