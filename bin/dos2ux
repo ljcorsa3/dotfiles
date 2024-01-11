@@ -1,0 +1,59 @@
+#! /bin/sh
+# implement dos2ux and ux2dos commands using sed
+# supports "-i" for in-place conversion (backup to "~" suffix)
+
+function usage {
+    case $ME in
+    dos2ux|ux2dos) >&2 echo "Usage: $ME [-i|-] [file]" ;;
+    *) >&2 echo "This script ($ME) must be run as ux2dos or dos2ux." ;;
+    esac
+    exit 1
+}
+
+function help {
+    case $ME in
+    ux2dos) >&2 echo -n "ux2dos adds a carriage-return character (CR)"
+        >&2 echo " to the end of each line"
+        >&2 echo "   which does not already have DOS line ending." ;;
+    dos2ux) >&2 echo "dos2ux removes trailing CR from each line." ;;
+    esac
+    >&2 echo "Usage: $ME [-i|-] [file]"
+    >&2 echo -n "'-i' option performs the conversion in-place" 
+    >&2 echo " (backup created with '~' suffix)"
+    >&2 echo "'-' option causes stdin to be the source (if possible)"
+    exit 0
+}
+
+# under what name was this script invoked?
+ME=$(basename $(readlink -f "${BASH_SOURCE[0]}"))
+case $ME in
+    dos2ux) SEDEXP='s/\r$//' ;;       # CRLF -> LF
+    ux2dos) SEDEXP='/[^\r]$/s/$/\r/' ;;  # LF -> CRLF (ignore if already CRLF)
+    *) usage ;;
+esac
+
+# if no command line, assume I'm in a pipeline
+if [ $# -eq 0 ]; then
+    [ -t 0 ] && usage 
+    exec sed -e "${SEDEXP}"
+fi
+
+# if claiming stdin for input, assume pipeline again
+if [ "$1" == "-" ]; then
+    [ -t 0 ] && usage  
+    exec sed -e "${SEDEXP}"
+fi
+
+# check all the arguments, pick out options and files
+declare -a FILES=()
+for ARG in "$@"; do
+    case "$ARG" in
+        -i) ARGS="--in-place=~ --follow-symlinks --copy" ;;
+        -?|/?|-h|--help) help ;;
+        -*|--*) usage ;;
+        *) FILES[${#FILES[@]}]="$ARG" ;; # ARG -> last element
+    esac
+done
+
+# process files 
+exec sed -e "${SEDEXP}" $ARGS "${FILES[@]}"
