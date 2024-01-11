@@ -1,0 +1,374 @@
+#!/usr/bin/gawk --exec
+
+function usage(message) {
+    if ( length(message)>0 ) {
+        printf "%s: %s\n", me, message > "/dev/stderr"
+    }
+    printf "Usage: %s [options] host\n", me                           > "/dev/stderr"
+    print  "       [-p|--ping]     - after lookup, perform ping"      > "/dev/stderr"
+    print  "       [-q|--quick]    - minimize output"                 > "/dev/stderr"
+    print  "       [-a|--alias]    - alias stuff"                     > "/dev/stderr"
+    print  "       [-d|--debug]    - increase debug level"            > "/dev/stderr"
+    print  "       [-v|--verbose]  - increase chatter level"          > "/dev/stderr"
+    print  "       [-F configfile] - use alternate ssh_config"        > "/dev/stderr"
+    exit (failed = 1)
+}
+
+function report(message) {
+    if (verbose>0) {
+		print gensub(/(^[[:space:]]+)(.*?)([[:space:]]*)/, "\\2","g",message)
+    }
+}
+
+function debugout(message,      i,s) {
+    if (debug>0) {
+		for (i=1; i<=debug; i++) {
+			printf ">"  > "/dev/stderr"
+		}
+		s=gensub(/(^[[:space:]]+)(.*?)([[:space:]]*)/, "\\2","g",message)
+        print me ": " s > "/dev/stderr"
+    }
+}
+
+function die(message) {
+    if ( length(message)==0 ) {
+        message = " failed (unknown error)"
+    }
+    print me ": " message > "/dev/stderr"
+    exit (failed = 1)
+}
+
+function isIP(string) {
+    # determine if a string is in IP address form
+    # (without {n,m}, use max length, contents, and pattern)
+    if ( length(string)<7 || length(string)>15 ) { return 0 }
+    if(match(string,"[^[:digit:].]")) { return 0 }
+    return (1 == match(string,/^[[:digit:]]+.[[:digit:]]+.[[:digit:]]+.[[:digit:]]+$/))
+}
+
+function isRoutableIP(string,    n,x) {
+	if (!(isIP(string))) return 0
+	debugout("isRoutable " string)
+	n = split(string,x,".")
+	debugout(n)
+	if(n!=4) return 0
+	debugout(x[1] " " x[2] " " x[3] " " x[4])
+	if (x[1]==10) return 0
+	if ((x[1]==192) && (x[2]=168)) return 0
+	if (x[1]==172) {
+		if ((x[2]>=16) && (x[2]<=31)) return 0
+	}
+	return 1
+}
+
+function quoteWildcard(wcstring,   i,c,out) {
+    # apply layer of quoting to strings known to contain wildcard chars
+    for (i=1; i<=length(wcstring); i++) {
+        c = substr(wcstring,i,1)
+        if (c=="*") { out = out ".*" } 
+        else if (c==".") { out = out "\\." }
+        else { out = out c }
+    }
+    return out
+}
+
+# look up hostname and IP
+function getHostInfo(target,       name,ip,cmd,line,i,n,x) {
+	# try the nameserver
+	debugout("getHostInfo target " target)
+	cmd = "dig +search +time=1 +short -4 "
+	if (isIP(target)) { # use dig -x for reverse lookup
+		if (isRoutableIP(target)) {
+			ip = target
+			cmd = cmd " -x " ip " 2>/dev/null"
+			debugout("cmd: " cmd)
+			cmd | getline line; close(cmd)
+			debugout("resp: " line)
+			if(length(line)) {
+				name = gensub(/(.*)(\.)$/,"\\1","g",line) # remove trailing dot
+				aliases[name]=name
+			} else {
+                name = target
+            }
+		}
+	} else { # use dig for normal name lookup
+		name = target
+		cmd = cmd " " name " 2>/dev/null"
+		debugout("cmd: " cmd)
+		cmd | getline line; close(cmd)
+		debugout("resp: " line)
+		if (isIP(line)) {
+			ip = line
+		} else {
+            ip = target
+        }
+	}
+
+	# try local hosts file
+	cmd = "getent hosts " target " 2>/dev/null"
+	debugout("cmd: " cmd)
+	cmd | getline line; close(cmd)
+	debugout("resp: " line)
+	n = split(line, x, "[[:space:]]+")
+	if ( (n>1) && (isIP(x[1])) ) { # got a valid response from getent
+		ip = x[1]; name = x[2]
+		if (n>2) {
+			for(i=2; i<=n; i++) { aliases[x[i]] = x[i] }
+		}	
+	} 
+	return ip ":" name 
+}
+    
+################################################################################
+BEGIN {
+    IGNORECASE = 1
+    verbose = alias = debug = failed = found = inTargetSection = quick = ping = 0
+    config =  ENVIRON["HOME"] "/.ssh/config"
+
+    # get the name of our process into "me"
+    pscmd = "2>/dev/null ps -o cmd --no-headers -p " PROCINFO["pid"]
+    pscmd | getline psoutput; close(pscmd)
+    # extract the name of the script from the "ps" output
+    me = psoutput
+    # remove command from start of string
+    sub(".*awk[[:space:]]+--exec[[:space:]]+.*/","",me) # 
+    # remove all but the first word
+    sub("[[:space:]].*","",me)
+
+	# set up SSH command
+    sshcmd = "2>/dev/null ssh -o 'CheckHostIP no' -o 'StrictHostKeyChecking no' " 
+    sshcmd = sshcmd "  -o 'UserKnownHostsFile /dev/null' "
+    sshcmd = sshcmd "  -o 'ControlPersist 60' "
+    sshcmd = sshcmd "  -o 'ControlPath /tmp/" me "-%l-%r@%h:%p' "
+    sshcmd1 = sshcmd " -o 'ControlMaster yes' "
+
+	# maybe I'm a link called sshping
+	if(match(me,"ping")>0) { ping = 1 }
+
+    # extract the full command without args from "ps" output
+    n = index(psoutput,me)+length(me)-1
+    mycmdline = substr(psoutput,1,n)
+
+    # parse incoming arguments
+    if (ARGC<2) { usage() }
+
+    # save local flags
+    for (i=1;i<ARGC;i++) {
+        if(ARGV[i] == "-h" ||  ARGV[i] == "--help" ) {
+            usage()
+        } else if(ARGV[i] == "-p" || ARGV[i] == "--ping" ) {
+            ping = 1
+        } else if(ARGV[i] == "-q" ||  ARGV[i] == "--quick" ) {
+            quick = 1
+        } else if(ARGV[i] == "-a" ||  ARGV[i] == "--alias" ) {
+            alias = 1
+        } else if(ARGV[i] == "-F" ||  ARGV[i] == "--config" ) {
+            config = ARGV[i+1]
+            delete ARGV[i++]
+        } else if(ARGV[i] == "-v" ||  ARGV[i] == "--verbose" ) {
+            verbose++
+        } else if(ARGV[i] == "-d" ||  ARGV[i] == "--debug" ) {
+            debug++
+        } else if (1 == match(ARGV[i],"-")) {
+            usage("unknown option: " ARGV[i])
+        } else {
+            targetHost = ARGV[i]
+        }
+        delete ARGV[i]
+    }
+
+    # no ping in quick mode
+    if(quick) { alias=verbose=ping=0 }
+	if(debug) { verbose=1 }
+
+    # verify user config file exists, and use as input file
+	# (awk needs to have a file arg)
+    ARGV[1] = config
+    if ((getline junk < ARGV[1]) <0) {
+        die("Cannot access " ARGV[1] ".")
+    }
+
+} # /BEGIN
+
+################################################################################
+# parse the ssh_config file
+
+# skip blamks and comments
+$NF == 0 { next }
+$1 ~ /^#/ { next }
+
+# hit global section at the end. done
+$1 == "Host" && $2 == "*" { exit (failed = 0) }
+
+# found a Host line.  check the entries on the rest of the line
+$1 == "Host" {
+	# check if we're starting a new section after success
+	if(inTargetSection) { exit (failed = 0) }
+
+	debugout($0)
+    inTargetSection = hasWildcard = 0
+    delete aliases
+    for(i=2; i<=NF; i++) {
+		s=$i
+		p=index(s,"#") # catch comments
+		if (p>0) {
+			if(p==1) { # entire field is comment
+				break
+			} else { # comment in midst of field
+				s=substr(s,1,p-1)
+				i=NF+1 # break
+			}
+		}
+		# collect all the non-comments as aliases
+        if(!(isIP(s))) {
+			aliases[s]=s
+		}
+		# if we have a match or wildcard, we're in the right section of the file
+        if ( s == targetHost) {
+            inTargetSection = 1
+        } else if (index(s,"*")>0) {
+            re = quoteWildcard(s) 
+            if(match(targetHost,re)==1) {
+                inTargetSection = hasWildcard = 1
+            }
+        }
+    }
+	if(inTargetSection) {
+		if(hasWildcard) {
+			report("Matched " targetHost " in " $0)
+		} else {
+            report("Found " targetHost " in " $0)
+		}
+		s = ""; for (i in aliases) { s = s " " aliases[i] }
+		debugout("aliases:" s)
+	} else {
+		delete aliases
+	}
+}
+
+# see if there is a hostname entry for the found host
+$1 == "Hostname" && inTargetSection {
+    debugout($0)
+	hostName = hostIP = ""
+    line = getHostInfo($2)
+	debugout(line)
+    if(isIP($2)) {
+        hostIP = $2
+    } else {
+        hostName = $2
+    }
+    if(split(line,x,":")==2) {
+        if(length(x[1])>0) { hostIP = x[1] }
+        if(length(x[2])>0) { hostName = x[2] }
+    }
+	if(length(hostName)>0) {
+		aliases[hostName]=s
+	}
+	report("Hostname " $2 " found for " targetHost ". " hostIP ":" hostName)
+    found = 1
+}
+
+# look for potential proxy in section
+$1 == "ProxyCommand" && inTargetSection {
+    debugout($0)
+    # call myself (with quick option) to get info on proxyserver
+    if (debug) {
+        cmd = mycmdline " -q -d "
+		for (i=1; i<=debug; i++) {
+			cmd = cmd " -d "	
+		}
+        cmd = cmd " " $NF 
+    } else {
+        cmd = mycmdline " -q " $NF " 2>/dev/null"
+    }
+	debugout("calling myself to look up proxy " $NF)
+    cmd | getline line; close(cmd)
+	debugout("proxy: " line)
+    if(split(line,x,":")==2) {
+        if(length(x[2])>0) { proxyIP = remhost = x[2] }
+        if(length(x[1])>0) { proxyName = remhost = x[1] }
+    } else {
+        die("can't sort " $NF)
+    }
+	report("Proxy " $NF " found for " targetHost)
+
+    # see if we can figure out the proxy target. assume the canonical form is:
+	# ProxyCommand ssh -o 'Compression no' -W $(basename %h .lab):22 css.lab
+	# %h would be the target, we will find it and simulate the basename
+    if ( hasWildcard && ($0 ~ /ssh.*-W.*basename/) ) { 
+        for (i=1; i<NF; i++) {
+            if (match($i,/basename$/) && ($(i+1)=="%h") && match($(i+2),/^./) ) {
+                # do what the basename would have done
+                suffix=gensub(/([^\.]*)(\.[[:alnum:]]+)(.*)/,"\\2",$(i+2))
+                sub(suffix "$","",targetHost)
+            }
+        }
+    }
+
+    # reach out to proxyserver for name of target host
+	debugout("asking proxy " remhost " for its hostname and to lookup " targetHost)
+    cmd=sshcmd1 remhost " \"bash -c 'paste <(hostname) <(getent hosts " targetHost ")'\""
+	debugout("cmd: " cmd)
+    cmd | getline line; close(cmd)
+	debugout("response: " line)
+    if (length(line)>0) {
+        if((split(line,x,"[[:space:]]+")>1) && (isIP(x[2])) ) { # got a valid response from getent
+            found = 1
+            proxyName=x[1]; hostIP=x[2]; hostName=x[3]
+			report("Proxy is " proxyName)
+        }
+    } else {
+        die("proxyserver " proxyName " can't sort " remhost)
+    } 
+}
+
+END { 
+    # if flag, don't produce more output
+	if (!found) { 
+		line = getHostInfo(targetHost)
+		if(split(line,x,":")==2) {
+			if(length(x[1])>0) { hostIP = x[1] }
+			if(length(x[2])>0) { hostName = x[2] }
+			found = 1
+		}
+    }
+	if (!found) { debugout("not found"); exit 1 }
+    if (failed) { debugout("failed"); exit failed }
+
+    if(quick) {
+        printf "%s:%s\n", hostName, hostIP
+        exit
+    }
+
+	delete aliases[targetHost]
+    if (length(hostName)>0) {
+		printf "%s == %s:%s", targetHost, hostName, hostIP
+		delete aliases[hostName]
+	} else {
+		printf "%s == %s", targetHost, hostIP
+	}
+	if (alias) {
+		first=1
+		for (i in aliases) {
+			if(first) { first=0; printf(" aka: ") }
+			printf("%s ",aliases[i])
+		}
+	}
+    if (length(proxyName)>0 || length(proxyIP)>0) {
+		printf " via "
+		if (length(proxyName)>0) {
+			printf "%s:%s", proxyName, proxyIP 
+		} else {
+			printf "%s", proxyIP 
+		}
+	}
+	printf("\n")
+	if (ping) {
+		if (length(proxyIP)>0) {
+            failed = system(sshcmd proxyIP " ping -n -c 1 -W 1 " hostIP)
+		} else {
+            failed = system("2>/dev/null ping -n -c 1 -W 1 " hostIP)
+        }
+    }
+    exit (failed)
+}
