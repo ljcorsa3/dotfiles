@@ -22,7 +22,8 @@ SHARES['g']="//frd1vdevnet01p/data/Germantown"
 SHARES['p']="//grm1pfs01p/sys/Engineering"
 
 read -rs -p "Windows password for ${WINDOM}\\${WINUSER}: " PASSWD
-echo 'cr\nel' | tput -S
+echo
+#echo 'cr\nel' | tput -S
 
 [ "${PASSWD}" ] || die "Windows password required!"
 

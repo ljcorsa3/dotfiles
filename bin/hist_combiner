@@ -10,6 +10,7 @@ if (return 0 2>/dev/null); then
     trap 'eval "$RET_TRAP"; unset isSourced LEAVE REGEX FILES AWKSCRIPT MAX rc RET_TRAP' RETURN
     [ "${HISTFILE}" ] || ${LEAVE} 1
 else
+    [ "$1" == "-a" -o "$1" == "--all" ] && all=1 || all=0
     isSourced=0
     LEAVE=exit
 fi
@@ -18,11 +19,13 @@ fi
 
 # get list of history files
 REGEX='.*/.bash_history/'
-REGEX+='[[:digit:]]{6}.*'
-REGEX+="-${HOST}-"
+if ((all)); then
+    REGEX+='[[:digit:]]{6}.*'
+    REGEX+="-${HOST}-"
+fi
 REGEX+='.*'
 FILES=( $(find ~/.bash_history -mindepth 1 -maxdepth 1 \
-    -regextype posix-egrep -regex "${REGEX}" -print) )
+    -regextype posix-egrep -regex "${REGEX}" -type f -print) )
 ((${#FILES[@]})) || $LEAVE 1
 
 # store the awk script

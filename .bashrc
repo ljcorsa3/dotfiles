@@ -4,7 +4,7 @@
 # skip if not interactive WITH a tty
 [[ $- == *i* ]] || return
 [ -t 0 ] || return
-    
+[ "$(basename ${SHELL})" == "sh" ] && return   
 # Source global definitions # sourced in local definitions
 # [ -r /etc/bashrc ] && source /etc/bashrc
 
@@ -14,7 +14,6 @@
 #builtin history -r
 
 # ssh logins don't always source .bash_profile
-export BASHRC_SOURCED=1
 [ -z "${BASHPROFILE_SOURCED}" -a -r ~/.bash_profile ] && source ~/.bash_profile
 
 set -o vi
@@ -26,14 +25,21 @@ bind '"\\e[B":history-search-forward'
 bind '"\\e0A":history-search-backward'
 bind '"\\e0B":history-search-forward'
 # make tab cycle through commands after listing
-bind '"\t":menu-complete'
-bind "set show-all-if-ambiguous off"
-bind "set completion-ignore-case off"
+bind 'TAB:menu-complete'
+#bind "set show-all-if-ambiguous off"
+#bind "set show-all-if-unmodified on"
+bind "set completion-ignore-case on"
 bind "set menu-complete-display-prefix on"
 
 shopt -sq dotglob nocaseglob
 shopt -sq checkwinsize cmdhist huponexit histappend xpg_echo
 [ ${BASH_VERSINFO[0]} -gt 3 ] && shopt -sq globstar
+if [[  ${BASH_VERSINFO[0]} -ge 4 &&  ${BASH_VERSINFO[1]} -ge 2 &&
+     ${BASH_VERSINFO[2]} -ge 29 ]]; then
+    shopt -s direxpand dirspell
+fi
+[ "${BASHRC_SOURCED}" ] && return
+export BASHRC_SOURCED=1
 
 # User specific aliases
 [ -r ~/.aliases ] && source ~/.aliases

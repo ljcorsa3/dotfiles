@@ -2,11 +2,10 @@
 # vim: filetype=sh
 
 alias vnc='sudo systemctl restart vncserver.ljcorsa@:2.service'
-alias bench="title bench; connect 172.22.24.78:8081"
-alias chamber="title chamber; connect 172.22.24.77:8081"
-alias usb0="title ttyUSB0; connect USB0"
-alias usb1="title ttyUSB1; connect USB1"
-alias usb2="title ttyUSB2; connect USB2"
+alias bench="title bench; connect 172.22.24.77:8081"
+alias chamber="title chamber; connect 172.22.24.78:8081"
+alias usb0="title ttyUSB0; minicom usb0"
+alias usb1="title ttyUSB1; minicom usb1"
 alias dj='echo "1-703-296-9722"'
 alias l="command ls -m $LS_OPTIONS"
 alias la="command ls -A $LS_OPTIONS"
@@ -147,11 +146,11 @@ if type -p rlwrap &>/dev/null; then
     alias tcl="${RLW} tclsh"
     alias tclsh="${RLW} tclsh"
     alias expect="${RLW} expect"
-    RLW=rlwrap
-    alias ftp="${RLW} -H ${HOME}/.ftphist --always-readline /usr/bin/ftp"
-    alias ipython="${RLW} -H .py_hist -s 20000 --always-readline python"
-    alias ipy="${RLW} -H .py_hist -s 20000 --always-readline python"
-    alias pdb="${RLW} -H .pdb_hist -s 20000 --always-readline python -m pdb"
+    RLW='rlwrap --always-readline -s 20000'
+    alias ftp="${RLW} -H ${HOME}/.ftp_history /usr/bin/ftp"
+    alias ipython="${RLW} -H ${HOME}/.python_history"
+    alias ipy="${RLW} -H ${HOME}/.python_history"
+    alias pdb="${RLW} -H ${HOME}/.pdb_history python -m pdb"
     # make python = python3
     # alias python=$(alias python3 | sed -e 's/alias python3=//' | xargs echo)
 unset RLW

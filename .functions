@@ -63,10 +63,9 @@ function cd_ {
             tail=${1#*/}
         fi
         case ${head} in
-            git) head="${GIT_ROOT}" ;;
-            dsp) head=/home/dspteam ;;
-            rascal) head="/jdl/sources/rascal/src" ;;
-            drx) head="/jdl/sources/drx_unified_spew_overlap_working" ;;
+            bin) head="${HOME}/bin" ;;
+            h1) head="{$HOME}/PwrCycleMaster" ;;
+            h2) head="${HOME}/Harrier2" ;;
         esac
         if [ -d "${head}" ]; then
             set -- "${head}${tail:+/$tail}"
@@ -353,6 +352,7 @@ function ps {
             u) command ps -u ${USER} -H -o pid,ppid,args; return $? ;;
             e) command ps -e  -H -o pid,ppid,args; return $? ;;
             [[:digit:]]*) command ps --noheaders -p $1 -o pid,ppid,args -ww; return $? ;;
+            *) command ps "$@"; return $? ;;
         esac
     fi
     command ps "$@"
@@ -379,7 +379,7 @@ function new {
     local i a n="${#args[@]}"
     local num="$(( LINES/3 < 10 ? 10 : LINES/3 ))"
     local dir="." wildcards= filter= dirsonly=0 filesonly=0 digits=0 in_num=0 multi_wc=0
-    dotfiles="-e '^\.'"
+    local dotfiles=0 ignores
     for ((i=0; i<n; i++)); do
         a="${args[i]}"
         case "${a}" in
@@ -392,7 +392,7 @@ function new {
                 fi
                 ;;
             -a) in_num=0
-                dotfiles=
+                dotfiles=1
                 ;;
             -d) in_num=0
                 dirsonly=1
@@ -441,6 +441,14 @@ function new {
         esac
         shift
     done
+    if ! ((dotfiles)); then
+        if [ -z "${wildcards}" ]; then
+            wildcards="! -name '.*'"
+        else
+            wildcards+=" -a ! -name '.*'"
+            multi_wc=1
+        fi
+    fi
     # wrap wildcards in parens
     if ((multi_wc)); then
         wildcards='\( '${wildcards}' \)'
@@ -451,10 +459,10 @@ function new {
     else
         color="never"
     fi
+    [ -r ~/lib/new.ignore ] && ignores="eval grep -Ezv -f ${HOME}/lib/new.ignore 2>/dev/null |"
     (
-    cd "${dir}"
+    command cd "${dir}"
     eval find . -mindepth 1 -maxdepth 1 ${filter} ${wildcards} -printf '%P\\0' 2>/dev/null |
-        eval grep -Ezvf ~/lib/new.ignore ${dotfiles} 2>/dev/null |
         xargs -r0 command ls -dhlt --color=${color} 2>/dev/null |
         eval head --lines=${num} 2>/dev/null
     )
@@ -824,7 +832,6 @@ function getAgentPID {
 
 function startAgent {
     local SOCK SOCKS=() PID
-	export SSH_AUTH_SOCK SSH_AGENT_PID
     if [ "${SSH_AUTH_SOCK}" ] && timeout 1 ssh-add -l &>/dev/null; then 
 		# we have keys loaded, we're done
         [ "${SSH_AGENT_PID}" ] || SSH_AGENT_PID=$(getAgentPID "${SSH_AUTH_SOCK}")
@@ -1118,7 +1125,8 @@ function connect {
     if ((is_tty)); then
         printf "${FUNCNAME}: Opening ${TTY}... Ctrl-D to quit\n" >&2
         socat READLINE,noprompt,intr=17,history="${HIST}" \
-            GOPEN:${TTY},b115200,cs8,nonblock,rawer,lock,crnl,icanon=1
+            GOPEN:${TTY},b115200,cs8
+            #GOPEN:${TTY},b115200,cs8,nonblock,rawer,lock,crnl,icanon=1
     else
         printf "${FUNCNAME}: Opening ${addr}:${port}... Ctrl-D to quit\n" >&2
         socat READLINE,noprompt,intr=17,history="${HIST}" \

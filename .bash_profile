@@ -3,7 +3,7 @@
 # skip if not interactive WITH a tty
 [[ $- == *i* ]] || return
 [ -t 0 ] || return
-
+[ "$(basename ${SHELL})" == "sh" ] && { exec env -i HOME="${HOME}" ENV="${HOME}/.profile" ${SHELL} -il; }
 #debugging
 if ((0)); then
     LOGFILE=/tmp/${USER}-$$.xtrace.log
@@ -59,16 +59,27 @@ fi
 # export everything in this script (turn off at end)
 set -a
 
-# if launched from ssh, grab our remote client info
-if [ -n "${SSH_CLIENT}" ]; then
-    SSH_CLIENT_IP="${SSH_CLIENT%%[[:space:]]*}"
-    SSH_CLIENT_NAME=$(dig +search +time=1 +short -4 -x ${SSH_CLIENT_IP} \
-        2>/dev/null | sed -e 's/\.$//')
-fi
+# # if launched from ssh, grab our remote client info
+# if [ -n "${SSH_CLIENT}" ]; then
+#     SSH_CLIENT_IP="${SSH_CLIENT%%[[:space:]]*}"
+#     # SSH_CLIENT_NAME=$(nslookup ${SSH_CLIENT_IP} 2>/dev/null |
+#     #   awk '/name = / {sub(/\.$/,"",$NF); print $NF}')
+#     SSH_CLIENT_NAME=$(dig +search +time=1 +short +4 -x ${SSH_CLIENT_IP} \
+#         2>/dev/null | sed -e 's/\.$//')
+# fi
 
 # initialize important env vars
 TMOUT=0
 unset USERNAME MAILCHECK
+
+# # initialize ssh-agent if no signs exist
+# if [ -z "${SSH_AUTH_SOCK}" -a -r "~/.ssh/id_rsa" ]; then
+#     eval $(ssh-agent -s)
+# fi
+# if [ "${SSH_AUTH_SOCK}" ]; then
+#     ssh-add -l | grep -q "${USER}" || \
+#     ssh-add  <&-
+# fi
 
 if [[ "${USER,,}" =~ (ren|ljcorsa) ]]; then
     umask 0
@@ -112,12 +123,14 @@ fi
 GREP_COLOR='7;33'
 LS_OPTIONS='-Fh --color=auto --group-directories-first'
 command ls $LS_OPTIONS >/dev/null 2>&1  || LS_OPTIONS="-F --color=auto"
+# minicom: no init, Alt key, color, status
+MINICOM='-moz -c on'
 
 # set vim as editor if available
 FCEDIT=vi; EDITOR=vi; VISUAL=vi
 type -p vim >/dev/null 2>&1 && { EDITOR=vim; VISUAL=vim; }
 
-# set less as pager if available
+# set less as pager if availabel
 PAGER=more
 if type -p less >/dev/null 2>&1 ; then
     PAGER=less
@@ -177,9 +190,6 @@ if [[ $(readlink -f "${BASH_SOURCE[0]}") == "${HOME}/.bash_profile" ]]; then
     fi
 fi
 
-# get connected to an ssh agent
-#typeset -F startAgent &>/dev/null && startAgent
-
 #get nickname for HOST
 typeset -F getNickname &>/dev/null && HOST=$(getNickname)
 # set HOST to first declaration in ssh config if possible
@@ -237,18 +247,17 @@ fi
 # host-specific history
 TTY=$(tty | sed -e 's^/dev/^^' -e 's^/^^')
 if [[ "${USER,,}" =~ (pi|ren|ljcorsa) ]]; then
-    if [ -f ${HOME}/.bash_history ]; then # convert to a directory
+    if [ -f ${HOME}/.bash_history ]; then
         TMPHIST=$(mktemp)
         mv "${HOME}/.bash_history" "${TMPHIST}"
         mkdir "${HOME}/.bash_history"
         mv "${TMPHIST}" "${HOME}/.bash_history/$(date '+%y%m%d-%H:%M')-${HOST}-${TTY}"
     fi
-    HISTTIMEFORMAT="%a %m/%d %H:%M   "
+    HISTTIMEFORMAT="%s "
     HISTFILE="${HOME}/.bash_history/$(date '+%y%m%d-%H:%M')-${HOST}-${TTY}"
     HISTFILESIZE=0
     HISTCONTROL=erasedups
     HISTIGNORE="l:l[als]:h:hh:H:HH:history:[bf]g:exit"
-    #HISTIGNORE+=":cd:cdl:cdl[lta]:cd *:cdl *:cdl[lta] *"
     HISTFILESIZE=2200
     HISTSIZE=2000
     source ~/bin/hist_combiner
@@ -258,10 +267,10 @@ fi
 for d in ${HOME} /opt /usr/local; do
     if [ -f ${d}/anaconda3/etc/profile.d/conda.sh ]; then
         source ${d}/anaconda3/etc/profile.d/conda.sh
-    fi
-    if [ -f ${d}/anaconda3/bin/activate ]; then
-        source ${d}/anaconda3/bin/activate
-        conda activate base
+        if [ -f ${d}/anaconda3/bin/activate ]; then
+            source ${d}/anaconda3/bin/activate
+            conda activate base
+        fi
         break
     fi
 done
@@ -288,6 +297,18 @@ fi
 # remove duplicates in PATH
 PATH=$( printf '%s' "${PATH}" | 
     awk -v RS=':' '!($0 in a){a[$0];printf("%s%s",length(a)>1?":":"",$0)}' )
+
+# try to get a unique ssh agent going
+if [ "${WSL2}" == "1" ] && type -p wsl2-ssh-pageant &>/dev/null; then
+	export SSH_AUTH_SOCK="$HOME/.ssh/agent.sock"
+	rm -f ${SSH_AUTH_SOCK}
+	(
+		setsid nohup socat UNIX-LISTEN:"$SSH_AUTH_SOCK,fork" EXEC:wsl2-ssh-pageant &>/dev/null &
+		disown
+	)
+elif typeset -F startAgent &>/dev/null; then
+	startAgent -s
+fi
 
 # stop exporting vars
 set +a
