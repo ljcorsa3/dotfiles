@@ -1,0 +1,46 @@
+#!/bin/bash
+
+me=$(readlink -e "${BASH_SOURCE[0]}")
+me=$(basename "${me}" .sh)
+# if no command line, assume I'm in a pipeline
+if [ $# -eq 0 ]; then
+    if [ -t 0 ]; then
+        >&2 printf 'Usage: %s file [file ...]' "${me}"
+        exit 1
+    fi
+fi
+
+# store the awk script
+AWKSCRIPT=$(cat <<'AWKSCRIPT_END'
+    BEGIN {
+        timestamp=""
+        n=0
+    }
+    
+    # hash + timestamp
+    /^#[0-9]{10,10}/ {
+        timestamp = substr($1,2)
+        n=n+1
+        printf "%6d\t%-17.17s\t",n,strftime("%m/%d/%y %H:%M:%S", timestamp)
+        next
+    }
+
+    # everything else is a command to grow
+    {
+        timestamp=""
+        print
+        next
+    }
+
+    END {
+        if(length(timestamp)>0) {
+            print
+        }
+    }
+AWKSCRIPT_END
+)
+if (($#)); then
+    exec awk -- "${AWKSCRIPT}" "$@"
+else
+    exec awk -- "${AWKSCRIPT}" 
+fi

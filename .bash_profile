@@ -248,10 +248,17 @@ fi
 TTY=$(tty | sed -e 's^/dev/^^' -e 's^/^^')
 if [[ "${USER,,}" =~ (pi|ren|ljcorsa) ]]; then
     if [ -f ${HOME}/.bash_history ]; then
-        TMPHIST=$(mktemp)
+        # convert file to folder full of timestamped files
+        dt=$(stat --printf '%Z' "${HOME}/.bash_history")
+        dt=$(date '+%y%m%d-%H:%M' "@${dt}")
+        TMPHIST="${dt}-${HOST}-${TTY}"
+        # rename history file
         mv "${HOME}/.bash_history" "${TMPHIST}"
+        # create history folder
         mkdir "${HOME}/.bash_history"
-        mv "${TMPHIST}" "${HOME}/.bash_history/$(date '+%y%m%d-%H:%M')-${HOST}-${TTY}"
+        # move FILE to new folder
+        mv "${TMPHIST}" "${HOME}/.bash_history"
+        unset dt TMPHIST
     fi
     HISTTIMEFORMAT="%s "
     HISTFILE="${HOME}/.bash_history/$(date '+%y%m%d-%H:%M')-${HOST}-${TTY}"
