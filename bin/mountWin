@@ -11,9 +11,10 @@ die() {
     exit 1
 }
 
+
 declare -A MOUNTPTS SHARES
 WINUSER="larry.corsa"
-WINDOM="CORE"
+WINDOMAIN="CORE"
 MOUNTPTS['f']="/home/ljcorsa/mnt/f"
 MOUNTPTS['g']="/home/ljcorsa/mnt/g"
 MOUNTPTS['p']="/home/ljcorsa/mnt/p"
@@ -21,13 +22,9 @@ SHARES['f']="//grm1pfs01p/sys/Public"
 SHARES['g']="//frd1vdevnet01p/data/Germantown"
 SHARES['p']="//grm1pfs01p/sys/Engineering"
 
-read -rs -p "Windows password for ${WINDOM}\\${WINUSER}: " PASSWD
-echo
-#echo 'cr\nel' | tput -S
+sudo -l &>/dev/null || die "You gotta be able to sudo for this"
 
-[ "${PASSWD}" ] || die "Windows password required!"
-
-OPTS="domain=${WINDOM},username=${WINUSER},rw,uid=$(id -u),gid=$(id -g),vers=3.0"
+OPTS="domain=${WINDOMAIN},username=${WINUSER},rw,uid=$(id -u),gid=$(id -g),vers=3.0"
 
 for drv in "${!MOUNTPTS[@]}"; do
     if mount | awk -v d="${MOUNTPTS[$drv]}" 'BEGIN{rc=1} $3==d {rc=0} END{exit rc}' &>/dev/null; then
@@ -35,10 +32,19 @@ for drv in "${!MOUNTPTS[@]}"; do
     fi
 done
 
+[[ "$@" =~ -u ]] && exit 0
+
+read -rs -p "Windows password for ${WINDOMAIN}\\${WINUSER}: " PASSWD
+export PASSWD
+echo
+#echo 'cr\nel' | tput -S
+[ "${PASSWD}" ] || die "Windows password required!"
+
+
 for drv in "${!MOUNTPTS[@]}"; do
     mkdir -p "${drv}"
     chmod 755 "${drv}"
-    if sudo PASSWD="${PASSWD}" mount.cifs "${SHARES[$drv]}" "${MOUNTPTS[$drv]}" -o ${OPTS} 2>${errm}; then
+    if sudo mount.cifs "${SHARES[$drv]}" "${MOUNTPTS[$drv]}" -o ${OPTS} 2>${errm}; then
         mount |
             awk -v d="${MOUNTPTS[$drv]}" 'BEGIN{rc=1} $3==d {rc=0; print $0} END{exit rc}' 2>/dev/null |
             cut -c 1-$((COLUMNS-2))
