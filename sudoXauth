@@ -1,0 +1,12 @@
+#!/bin/bash
+# xauth list $DISPLAY | xargs sudo xauth add
+# sudo command with X
+# echo $DISPLAY | xargs sudo xauth remove
+
+sudo touch ~root/.Xauthority
+sudo xauth add $(xauth -f ~/.Xauthority list $DISPLAY)
+
+exit 0
+while IFS= read -r line; do
+    sudo xauth add ${line}
+done < <(xauth -f ~/.Xauthority list)
