@@ -1177,3 +1177,9 @@ function hosts {
     awk '$1 =="Host" && $2 != "*" {print $2}' ~/.ssh/config |
     xargs -n 1 sshlookup -a
 }
+function repl {
+    [ -n "${1}" ] || return 1
+    [ "${2}" -gt 0 ] 2>/dev/null || return 1
+    printf '%.s'"$1" $(seq 1 "$2")
+    #[ -t 1 ] && printf '\n'
+}
