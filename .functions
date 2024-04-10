@@ -539,29 +539,6 @@ function eb {
 }
 
 ################################################################################
-unalias func &>/dev/null
-function func {
-    (($#)) || return 1
-    
-    typeset -f |
-    awk -v funcName="$1" '
-        # initialize: no func found
-        BEGIN { inFunc=0; exitCode=1 }
-        # look for function declaration. we can report success.
-        $1 == funcName { inFunc=1; exitCode=0 }
-        # look for (and print) closing brace in first column
-        $0 ~ /^}$/ && inFunc == 1 && NF == 1 {
-            print; inFunc=0; exit 0
-        }
-        # print everything from declaration to closing brace
-        inFunc == 1 { print }
-        # report out
-        END { exit exitCode }
-    '
-    return $?
-}
-
-################################################################################
 function realpath {
     if [ -d "$1" ]; then
         ( command cd -P "$1" >&/dev/null && pwd -P )
@@ -1043,20 +1020,22 @@ function vars {
         }}}' | LANG=C LC_ALL=C LC_COLLATE=C sort
     fi
 }
+################################################################################
+unalias func &>/dev/null
+function func {
+    (($#)) || return 1
+    
+    typeset -f "$1" |
+        awk -v funcName="$1" '"^" funcName " ()$" {print}'
+}
+################################################################################
 unalias funcs &>/dev/null
 function funcs {
-    if (($#)); then
-        awk -v PAT="$@" 'BEGIN{for(i in ENVIRON) {
-            if(sub("BASH_FUNC_","",i)==1){ 
-                if(match(i,PAT)!=0){gsub(/\(|\)/,"",i);print i}
-            }
-        }}' | LANG=C LC_ALL=C LC_COLLATE=C sort
-    else
-        awk 'BEGIN{for (i in ENVIRON) {
-            if(sub("BASH_FUNC_","",i)==1){gsub(/\(|\)/,"",i); print i }
-            }
-        }' | LANG=C LC_ALL=C LC_COLLATE=C sort
-    fi
+    local pattern="." 
+    (($#)) && pattern="$1"
+    typeset -f |
+        awk -v pattern="${pattern}" '/^declare -f/ && $3 ~ pattern {print $3}' |
+        LANG=C LC_ALL=C LC_COLLATE=C sort
 }
 
 function connect {
