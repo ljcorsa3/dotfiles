@@ -721,11 +721,12 @@ function genpasswd {
 }
 
 function getNickName {
-    local a b c h ENVDIR awkscript cmd
+    local a b c h ENVDIR awkscript cmd hostnames
     HOST=
-	cmd="{command hostname -f; command hostname -a; "
-	cmd+="command hostname -i; command hostname -I; } "
-	cmd+="| tr ' ' $'\n' | sed '/^$/d' | sort -ur"
+    hostnames=(  $(command hostname -s) )
+    hostnames+=( $(command hostname -A) )
+    hostnames+=( $(command hostname -f) )
+    hostnames+=( $(command hostname -I) )
     awkscript='BEGIN {IGNORECASE=rc=1}
                $0 ~ h && $1=="Host" { 
                     for(i=2;i<=NF;i++) {
@@ -736,13 +737,13 @@ function getNickName {
     if [ -z "${HOST}" -a -n "${BASH_ENV}" ]; then
         ENVDIR=$(eval command cd $(dirname "${BASH_ENV}") && pwd)
         if [ "${ENVDIR}" != "${HOME}" -a -r "${ENVDIR}/.ssh/config" ]; then
-           for h in $(${cmd}); do
+           for h in "${hostnames[@]}" ; do
                HOST=$(awk -v h=${h} -- "${awkscript}" "${ENVDIR}/.ssh/config" ) && break
            done
         fi
     fi
     if [ -z "${HOST}" -a -n "${HOME}/.ssh/config" ]; then
-		for h in $( ${cmd}); do
+        for h in "${hostnames[@]}" ; do
 			HOST=$(awk -v h=${h} -- "${awkscript}" "${HOME}/.ssh/config" ) && break
 		done
     fi
